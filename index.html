@@ -743,7 +743,7 @@ body::before {
       </div>
       <div class="input-group">
         <label class="input-label">캔들 수 (50~200)</label>
-        <input type="number" class="ctrl-input" id="inputCandleCount" value="100" min="50" max="200">
+        <input type="number" class="ctrl-input" id="inputCandleCount" value="100" min="30" max="100">
       </div>
     </div>
 
@@ -967,37 +967,89 @@ async function testBinanceProxy() {
 // ─────────────────────────────────────────
 async function fetchUpbitCandles(market, count) {
   count = count || 100;
+  // 업비트는 한 번에 최대 200개, 100개로 제한해서 안정성 확보
+  if (count > 100) count = 100;
   var url = 'https://api.upbit.com/v1/candles/minutes/60?market=' + market + '&count=' + count;
-  try {
-    var res = await fetch(url, { headers: { accept: 'application/json' } });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    var data = await res.json();
-    return data.reverse().map(function(c) {
-      return {
-        time:   new Date(c.candle_date_time_kst).getTime(),
-        open:   c.opening_price,
-        high:   c.high_price,
-        low:    c.low_price,
-        close:  c.trade_price,
-        volume: c.candle_acc_trade_volume
-      };
-    });
-  } catch (e) {
-    addLog('[UPBIT] ' + market + ' 수집 실패: ' + e.message, 'err');
-    return [];
+
+  // 최대 3회 재시도 (Rate Limit 대응)
+  for (var attempt = 1; attempt <= 3; attempt++) {
+    try {
+      var controller = new AbortController();
+      var timer = setTimeout(function() { controller.abort(); }, 8000);
+      var res = await fetch(url, {
+        headers: { accept: 'application/json' },
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+
+      // Rate Limit (429) 시 잠시 대기 후 재시도
+      if (res.status === 429) {
+        addLog('[UPBIT] ' + market + ' Rate Limit, ' + (attempt * 1000) + 'ms 대기 후 재시도...', 'warn');
+        await sleep(attempt * 1000);
+        continue;
+      }
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+
+      var data = await res.json();
+      if (!Array.isArray(data) || data.length === 0) throw new Error('빈 응답');
+
+      return data.reverse().map(function(c) {
+        return {
+          time:   new Date(c.candle_date_time_kst).getTime(),
+          open:   c.opening_price,
+          high:   c.high_price,
+          low:    c.low_price,
+          close:  c.trade_price,
+          volume: c.candle_acc_trade_volume
+        };
+      });
+
+    } catch (e) {
+      if (attempt < 3) {
+        addLog('[UPBIT] ' + market + ' 재시도 ' + attempt + '/3: ' + e.message, 'warn');
+        await sleep(attempt * 800);
+      } else {
+        addLog('[UPBIT] ' + market + ' 수집 최종 실패: ' + e.message, 'err');
+        return [];
+      }
+    }
   }
+  return [];
 }
 
 async function fetchUpbitTicker(markets) {
-  var url = 'https://api.upbit.com/v1/ticker?markets=' + markets.join(',');
-  try {
-    var res = await fetch(url, { headers: { accept: 'application/json' } });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    return await res.json();
-  } catch (e) {
-    addLog('[UPBIT] Ticker 수집 실패: ' + e.message, 'err');
-    return [];
+  // 한 번에 너무 많으면 분할 요청 (20개씩)
+  var chunkSize = 20;
+  var result = [];
+  for (var i = 0; i < markets.length; i += chunkSize) {
+    var chunk = markets.slice(i, i + chunkSize);
+    var url = 'https://api.upbit.com/v1/ticker?markets=' + chunk.join(',');
+    for (var attempt = 1; attempt <= 3; attempt++) {
+      try {
+        var controller = new AbortController();
+        var timer = setTimeout(function() { controller.abort(); }, 8000);
+        var res = await fetch(url, {
+          headers: { accept: 'application/json' },
+          signal: controller.signal
+        });
+        clearTimeout(timer);
+        if (res.status === 429) {
+          await sleep(attempt * 1000);
+          continue;
+        }
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        var data = await res.json();
+        result = result.concat(data);
+        break;
+      } catch (e) {
+        if (attempt === 3) addLog('[UPBIT] Ticker 청크 실패: ' + e.message, 'warn');
+        else await sleep(attempt * 600);
+      }
+    }
+    // 청크 사이 딜레이
+    if (i + chunkSize < markets.length) await sleep(300);
   }
+  return result;
 }
 
 // ─────────────────────────────────────────
@@ -1584,7 +1636,7 @@ async function startScan() {
   }
 
   // BTC 기준 캔들
-  var btcCandles = await loadBTCCandles(candleCount);
+  var btcCandles = await loadBTCCandles(Math.min(candleCount, 100));
   var btcCloses  = btcCandles.map(function(c){ return c.close; });
 
   // 심볼 목록
@@ -1620,7 +1672,8 @@ async function startScan() {
       addLog('[' + base + '] 점수: ' + analysis.score.total + ' (' + analysis.score.grade + '등급)',
              (analysis.score.grade==='S'||analysis.score.grade==='A') ? 'ok' : 'info');
     }
-    await sleep(100);
+    // 업비트 Rate Limit 방지: 심볼 사이 충분한 대기
+    await sleep(500);
   }
 
   updateProgress(100, '완료');
@@ -1648,9 +1701,10 @@ async function analyzeSymbol(base, candleCount, btcCloses, upbitTickerMap, binan
   var binanceSymbol = SYMBOL_MAP[base].binance;
   var upbitCandles  = [], binanceCandles = null, ticker24h = null;
 
-  // 업비트 캔들
+  // 업비트 캔들 (최대 100개로 제한해서 안정성 확보)
+  var safeCount = Math.min(candleCount, 100);
   if (state.exchanges.upbit && upbitMarket) {
-    var raw = await fetchUpbitCandles(upbitMarket, candleCount);
+    var raw = await fetchUpbitCandles(upbitMarket, safeCount);
     upbitCandles = normalizeCandles(raw);
     if (upbitTickerMap[upbitMarket]) {
       var t = upbitTickerMap[upbitMarket];
@@ -1662,7 +1716,7 @@ async function analyzeSymbol(base, candleCount, btcCloses, upbitTickerMap, binan
 
   // 바이낸스 캔들
   if (state.exchanges.binance && binanceSymbol && getProxyUrl()) {
-    var rawB = await fetchBinanceCandles(binanceSymbol, candleCount);
+    var rawB = await fetchBinanceCandles(binanceSymbol, safeCount);
     if (rawB) binanceCandles = normalizeCandles(rawB);
     if (!ticker24h && binanceTickerMap[binanceSymbol]) {
       var bt = binanceTickerMap[binanceSymbol];
