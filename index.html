@@ -799,7 +799,7 @@ body::before {
     <div class="control-row">
       <div class="input-group">
         <label class="input-label">스캔 심볼 수</label>
-        <input type="number" class="ctrl-input" id="inputSymbolCount" value="20" min="5" max="50">
+        <input type="number" class="ctrl-input" id="inputSymbolCount" value="30" min="5" max="50">
       </div>
       <div class="input-group">
         <label class="input-label">최소 점수 (기본 4)</label>
@@ -957,176 +957,111 @@ body::before {
 <script>
 
 // ══════════════════════════════════════════════════════════════════
-// CRYPTO SCANNER v5 — 실전 매매 최적화 엔진
-// 세력 진입 → 급등 직전 선제 포착 시스템
+// CRYPTO SCANNER v6 — 업비트 전체 마켓 기반 급등 직전 포착 시스템
+// 고정 심볼 분석기 → 시장 전체 탐색기로 전환
 // ══════════════════════════════════════════════════════════════════
 
-// ── 심볼 맵 (전체 후보풀) ─────────────────────────────────────────
+// SYMBOL_MAP: fallback 용도 (바이낸스 심볼 매핑, BTC 기준 등)
 var SYMBOL_MAP = {
-  BTC:   { upbit:'KRW-BTC',   binance:'BTCUSDT'   },
-  ETH:   { upbit:'KRW-ETH',   binance:'ETHUSDT'   },
-  XRP:   { upbit:'KRW-XRP',   binance:'XRPUSDT'   },
-  SOL:   { upbit:'KRW-SOL',   binance:'SOLUSDT'   },
-  BNB:   { upbit:null,        binance:'BNBUSDT'   },
-  ADA:   { upbit:'KRW-ADA',   binance:'ADAUSDT'   },
-  AVAX:  { upbit:'KRW-AVAX',  binance:'AVAXUSDT'  },
-  DOT:   { upbit:'KRW-DOT',   binance:'DOTUSDT'   },
-  ATOM:  { upbit:'KRW-ATOM',  binance:'ATOMUSDT'  },
-  NEAR:  { upbit:'KRW-NEAR',  binance:'NEARUSDT'  },
-  SUI:   { upbit:'KRW-SUI',   binance:'SUIUSDT'   },
-  APT:   { upbit:'KRW-APT',   binance:'APTUSDT'   },
-  SEI:   { upbit:'KRW-SEI',   binance:'SEIUSDT'   },
-  TIA:   { upbit:'KRW-TIA',   binance:'TIAUSDT'   },
-  LINK:  { upbit:'KRW-LINK',  binance:'LINKUSDT'  },
-  INJ:   { upbit:'KRW-INJ',   binance:'INJUSDT'   },
-  ARB:   { upbit:'KRW-ARB',   binance:'ARBUSDT'   },
-  OP:    { upbit:'KRW-OP',    binance:'OPUSDT'    },
-  MATIC: { upbit:'KRW-MATIC', binance:'MATICUSDT' },
-  UNI:   { upbit:'KRW-UNI',   binance:'UNIUSDT'   },
-  DOGE:  { upbit:'KRW-DOGE',  binance:'DOGEUSDT'  },
-  WIF:   { upbit:'KRW-WIF',   binance:'WIFUSDT'   },
-  PEPE:  { upbit:'KRW-PEPE',  binance:'PEPEUSDT'  },
-  TRX:   { upbit:'KRW-TRX',   binance:'TRXUSDT'   },
-  HBAR:  { upbit:'KRW-HBAR',  binance:'HBARUSDT'  },
+  BTC:'BTCUSDT',ETH:'ETHUSDT',XRP:'XRPUSDT',SOL:'SOLUSDT',BNB:'BNBUSDT',
+  ADA:'ADAUSDT',AVAX:'AVAXUSDT',DOT:'DOTUSDT',ATOM:'ATOMUSDT',NEAR:'NEARUSDT',
+  SUI:'SUIUSDT',APT:'APTUSDT',SEI:'SEIUSDT',TIA:'TIAUSDT',LINK:'LINKUSDT',
+  INJ:'INJUSDT',ARB:'ARBUSDT',OP:'OPUSDT',MATIC:'MATICUSDT',UNI:'UNIUSDT',
+  DOGE:'DOGEUSDT',WIF:'WIFUSDT',PEPE:'PEPEUSDT',TRX:'TRXUSDT',HBAR:'HBARUSDT',
+  BLUR:'BLURUSDT',JTO:'JTOUSDT',PYTH:'PYTHUSDT',STRK:'STRKUSDT',MANTA:'MANTAUSDT',
 };
 
-// ══════════════════════════════════════════════════════════════════
-// [핵심 신규] 1. buildDynamicTopBases
-// 오늘 실제 시장에서 움직이는 코인을 자동 선별
-// Ticker 데이터만으로 1차 필터링 → 상위 N개 반환
-// ══════════════════════════════════════════════════════════════════
-function buildDynamicTopBases(symbolCount, upbitTickerMap, binanceTickerMap) {
-  var scored = [];
-
-  Object.keys(SYMBOL_MAP).forEach(function(base) {
-    var upbitKey   = SYMBOL_MAP[base].upbit;
-    var binanceKey = SYMBOL_MAP[base].binance;
-    var uTicker    = upbitKey   ? upbitTickerMap[upbitKey]     : null;
-    var bTicker    = binanceKey ? binanceTickerMap[binanceKey]  : null;
-
-    // 데이터 없으면 제외
-    if (!uTicker && !bTicker) return;
-
-    var score = 0;
-
-    // ① 거래대금 점수 (자금 유입 없는 코인 제외)
-    var tradeValue = 0;
-    if (uTicker) {
-      // 업비트: acc_trade_price_24h (원화 기준)
-      tradeValue += (uTicker.acc_trade_price_24h || 0) / 1e10; // 100억 단위 정규화
-    }
-    if (bTicker) {
-      // 바이낸스: quoteVolume (USDT 기준)
-      tradeValue += (bTicker.quoteVolume || 0) / 1e7; // 1천만 달러 단위 정규화
-    }
-    if (tradeValue <= 0) return; // 거래대금 0 → 제외
-    score += Math.min(tradeValue, 5); // 최대 5점
-
-    // ② 변동성 점수 (절대 변동률 — 방향 무관)
-    var changeRate = 0;
-    if (uTicker) changeRate = Math.abs(uTicker.signed_change_rate * 100 || 0);
-    else if (bTicker) changeRate = Math.abs(bTicker.change24h || 0);
-    score += Math.min(changeRate / 3, 3); // 최대 3점 (9% 이상이면 만점)
-
-    // ③ 거래량 증가율 점수 — Ticker 레벨에서 추산
-    // 24h 거래량과 정규화된 값으로 추산 (캔들 없이 1차 필터용)
-    var volScore = 0;
-    if (uTicker) {
-      var vol24h = uTicker.acc_trade_volume_24h || 0;
-      // 단순 거래량 크기를 기준으로 점수 (캔들 기반 정밀 계산은 analyzeSymbol에서)
-      volScore = Math.min(vol24h / 1e6, 2); // BTC 등 대형은 높게, 소형 알트는 낮게
-    }
-    if (bTicker && bTicker.volume24h) {
-      volScore = Math.max(volScore, Math.min(bTicker.volume24h / 1e7, 2));
-    }
-    score += volScore;
-
-    // ④ 거래소 보너스 (업비트 + 바이낸스 동시 상장 = 글로벌 동조성)
-    if (uTicker && bTicker) score += 2;
-
-    // ⑤ 과열 패널티 (단순 상승률 과다 → Ticker 레벨)
-    // 주의: 여기서는 거래대금/변동성 기준이므로 단순 상승률 아님
-    // 극단적 급등만 감점 (캔들 기반 정밀 과열판정은 analyzeSymbol에서)
-    if (changeRate > 20) score -= 1.5; // 20% 이상 급등 = 이미 막차일 가능성
-
-    scored.push({ base: base, preScore: parseFloat(score.toFixed(2)) });
-  });
-
-  // 1차 점수 내림차순 정렬 → 상위 N개
-  scored.sort(function(a, b) { return b.preScore - a.preScore; });
-  var topBases = scored.slice(0, symbolCount).map(function(x) { return x.base; });
-
-  return topBases;
-}
-
 // ── 프록시 유틸 ──────────────────────────────────────────────────
-var BINANCE_PROXY = '';
+var BINANCE_PROXY='';
 
-function getProxyUrl() {
-  var input = document.getElementById('inputProxyUrl');
-  var val = input ? input.value.trim().replace(/\/$/, '') : '';
-  BINANCE_PROXY = val;
-  return val;
+function getProxyUrl(){
+  var input=document.getElementById('inputProxyUrl');
+  var val=input?input.value.trim().replace(/\/$/,''):'';
+  BINANCE_PROXY=val; return val;
 }
 
-function updateProxyStatus() {
-  var url = getProxyUrl();
-  var el = document.getElementById('proxyStatus');
-  if (!el) return;
-  if (!url) { el.textContent='미설정'; el.style.color='var(--text-muted)'; }
-  else if (url.startsWith('https://')) { el.textContent='설정됨 ✓'; el.style.color='var(--accent-green)'; }
-  else { el.textContent='URL 확인 필요'; el.style.color='var(--accent-yellow)'; }
+function updateProxyStatus(){
+  var url=getProxyUrl(),el=document.getElementById('proxyStatus');
+  if(!el) return;
+  if(!url){el.textContent='미설정';el.style.color='var(--text-muted)';}
+  else if(url.startsWith('https://')){el.textContent='설정됨 ✓';el.style.color='var(--accent-green)';}
+  else{el.textContent='URL 확인 필요';el.style.color='var(--accent-yellow)';}
 }
 
-// ── 타임아웃 fetch ────────────────────────────────────────────────
-function fetchWithTimeout(url, options, ms) {
-  ms = ms || 6000; // 9초→6초로 단축 (멈춤 방지)
-  var controller = new AbortController();
-  var timer = setTimeout(function() { controller.abort(); }, ms);
-  var opts = Object.assign({}, options || {}, { signal: controller.signal });
-  return fetch(url, opts).finally(function() { clearTimeout(timer); });
+function fetchWithTimeout(url,options,ms){
+  ms=ms||6000;
+  var controller=new AbortController();
+  var timer=setTimeout(function(){controller.abort();},ms);
+  var opts=Object.assign({},options||{},{signal:controller.signal});
+  return fetch(url,opts).finally(function(){clearTimeout(timer);});
 }
 
-async function testBinanceProxy() {
-  var proxy = getProxyUrl();
-  if (!proxy) return false;
-  try {
-    var res = await fetchWithTimeout(proxy + '/api/v3/ping', {}, 4000);
-    if (res.ok) { addLog('[WORKER] 연결 성공 ✓', 'ok'); return true; }
-    throw new Error('HTTP ' + res.status);
-  } catch(e) { addLog('[WORKER] 연결 실패: ' + e.message, 'err'); return false; }
+async function testBinanceProxy(){
+  var proxy=getProxyUrl(); if(!proxy) return false;
+  try{
+    var res=await fetchWithTimeout(proxy+'/api/v3/ping',{},4000);
+    if(res.ok){addLog('[WORKER] 연결 성공 ✓','ok');return true;}
+    throw new Error('HTTP '+res.status);
+  }catch(e){addLog('[WORKER] 연결 실패: '+e.message,'err');return false;}
+}
+
+// ══════════════════════════════════════════════════════════════════
+// [신규] A. 업비트 전체 KRW 마켓 목록 조회
+// 업비트에 상장된 모든 KRW 페어를 가져와 동적 스캔 대상 생성
+// ══════════════════════════════════════════════════════════════════
+async function fetchUpbitAllMarkets(){
+  // 업비트 공식 마켓 목록 API (CORS OK)
+  var proxy=getProxyUrl();
+  var urls=[];
+  if(proxy) urls.push(proxy+'/upbit/markets');
+  urls.push('https://api.upbit.com/v1/market/all?is_details=false');
+  for(var ui=0;ui<urls.length;ui++){
+    try{
+      var isProxy=urls[ui].indexOf('api.upbit.com')<0;
+      var opts=isProxy?{}:{headers:{accept:'application/json'}};
+      var res=await fetchWithTimeout(urls[ui],opts,6000);
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      var data=await res.json();
+      // KRW 마켓만 필터링
+      var krwMarkets=data.filter(function(m){return m.market&&m.market.startsWith('KRW-');});
+      addLog('[UPBIT] 전체 KRW 마켓 '+krwMarkets.length+'개 조회 완료','ok');
+      return krwMarkets; // [{market:'KRW-BTC', korean_name:'비트코인', ...}]
+    }catch(e){
+      if(ui===urls.length-1) addLog('[UPBIT] 마켓 목록 조회 실패: '+e.message,'err');
+    }
+  }
+  return [];
 }
 
 // ── 업비트 API ────────────────────────────────────────────────────
-async function fetchUpbitCandles(market, count) {
-  count = Math.min(count || 100, 200);
-  var proxy = getProxyUrl();
-  var urls = [];
-  if (proxy) urls.push(proxy + '/upbit/candles?market=' + market + '&count=' + count);
-  urls.push('https://api.upbit.com/v1/candles/minutes/60?market=' + market + '&count=' + count);
-
-  for (var ui = 0; ui < urls.length; ui++) {
-    var url = urls[ui];
-    for (var attempt = 1; attempt <= 2; attempt++) {
-      try {
-        var isProxy = url.indexOf('api.upbit.com') < 0;
-        var opts = isProxy ? {} : { headers:{ accept:'application/json' } };
-        var res = await fetchWithTimeout(url, opts, 6000);
-        if (res.status === 429) { await sleep(attempt * 800); continue; }
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        var data = await res.json();
-        if (!Array.isArray(data) || data.length === 0) throw new Error('빈 응답');
-        var sorted = isProxy ? data : data.reverse();
-        return sorted.map(function(c) { return {
-          time:   c.time   || new Date(c.candle_date_time_kst).getTime(),
-          open:   c.open   || c.opening_price,
-          high:   c.high   || c.high_price,
-          low:    c.low    || c.low_price,
-          close:  c.close  || c.trade_price,
-          volume: c.volume || c.candle_acc_trade_volume
-        }; });
-      } catch(e) {
-        if (attempt === 2) addLog('[UPBIT] ' + market + ' 실패: ' + e.message, ui===0?'warn':'err');
+async function fetchUpbitCandles(market,count){
+  count=Math.min(count||100,200);
+  var proxy=getProxyUrl();
+  var urls=[];
+  if(proxy) urls.push(proxy+'/upbit/candles?market='+market+'&count='+count);
+  urls.push('https://api.upbit.com/v1/candles/minutes/60?market='+market+'&count='+count);
+  for(var ui=0;ui<urls.length;ui++){
+    var url=urls[ui];
+    for(var attempt=1;attempt<=2;attempt++){
+      try{
+        var isProxy=url.indexOf('api.upbit.com')<0;
+        var opts=isProxy?{}:{headers:{accept:'application/json'}};
+        var res=await fetchWithTimeout(url,opts,6000);
+        if(res.status===429){await sleep(attempt*800);continue;}
+        if(!res.ok) throw new Error('HTTP '+res.status);
+        var data=await res.json();
+        if(!Array.isArray(data)||data.length===0) throw new Error('빈 응답');
+        var sorted=isProxy?data:data.reverse();
+        return sorted.map(function(c){return{
+          time:  c.time||new Date(c.candle_date_time_kst).getTime(),
+          open:  c.open||c.opening_price,
+          high:  c.high||c.high_price,
+          low:   c.low||c.low_price,
+          close: c.close||c.trade_price,
+          volume:c.volume||c.candle_acc_trade_volume
+        };});
+      }catch(e){
+        if(attempt===2) addLog('[UPBIT] '+market+' 실패: '+e.message,ui===0?'warn':'err');
         else await sleep(400);
       }
     }
@@ -1134,179 +1069,229 @@ async function fetchUpbitCandles(market, count) {
   return [];
 }
 
-async function fetchUpbitTicker(markets) {
-  var chunkSize = 20, result = [], proxy = getProxyUrl();
-  for (var i = 0; i < markets.length; i += chunkSize) {
-    var chunk = markets.slice(i, i + chunkSize);
-    var param = chunk.join(',');
-    var urls = [];
-    if (proxy) urls.push(proxy + '/upbit/ticker?markets=' + encodeURIComponent(param));
-    urls.push('https://api.upbit.com/v1/ticker?markets=' + param);
-    var done = false;
-    for (var ui = 0; ui < urls.length && !done; ui++) {
-      try {
-        var isProxy = urls[ui].indexOf('api.upbit.com') < 0;
-        var opts = isProxy ? {} : { headers:{ accept:'application/json' } };
-        var res = await fetchWithTimeout(urls[ui], opts, 6000);
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        var data = await res.json();
-        result = result.concat(Array.isArray(data) ? data : []);
-        done = true;
-      } catch(e) { addLog('[UPBIT] Ticker 실패: ' + e.message, 'warn'); }
+async function fetchUpbitTicker(markets){
+  // 최대 100개씩 분할 (업비트 제한)
+  var chunkSize=100,result=[],proxy=getProxyUrl();
+  for(var i=0;i<markets.length;i+=chunkSize){
+    var chunk=markets.slice(i,i+chunkSize);
+    var param=chunk.join(',');
+    var urls=[];
+    if(proxy) urls.push(proxy+'/upbit/ticker?markets='+encodeURIComponent(param));
+    urls.push('https://api.upbit.com/v1/ticker?markets='+param);
+    var done=false;
+    for(var ui=0;ui<urls.length&&!done;ui++){
+      try{
+        var isProxy=urls[ui].indexOf('api.upbit.com')<0;
+        var opts=isProxy?{}:{headers:{accept:'application/json'}};
+        var res=await fetchWithTimeout(urls[ui],opts,8000);
+        if(res.status===429){await sleep(1000);continue;}
+        if(!res.ok) throw new Error('HTTP '+res.status);
+        var data=await res.json();
+        result=result.concat(Array.isArray(data)?data:[]);
+        done=true;
+      }catch(e){addLog('[UPBIT] Ticker 실패: '+e.message,'warn');}
     }
-    if (i + chunkSize < markets.length) await sleep(200);
+    if(i+chunkSize<markets.length) await sleep(150);
   }
   return result;
 }
 
 // ── 바이낸스 API ──────────────────────────────────────────────────
-async function fetchBinanceCandles(symbol, count, interval) {
-  count = Math.min(count || 100, 200);
-  interval = interval || '1h';
-  var proxy = getProxyUrl();
-  if (!proxy) return null;
-  var url = proxy + '/api/v3/klines?symbol=' + symbol + '&interval=' + interval + '&limit=' + count;
-  try {
-    var res = await fetchWithTimeout(url, {}, 7000);
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    var data = await res.json();
-    if (!Array.isArray(data)) throw new Error('형식 오류');
-    return data.map(function(c) { return {
-      time:        parseInt(c[0]),
-      open:        parseFloat(c[1]),
-      high:        parseFloat(c[2]),
-      low:         parseFloat(c[3]),
-      close:       parseFloat(c[4]),
-      volume:      parseFloat(c[5]),
-      quoteVolume: parseFloat(c[7])
-    }; });
-  } catch(e) { addLog('[BINANCE] ' + symbol + ' 실패: ' + e.message, 'err'); return null; }
+async function fetchBinanceCandles(symbol,count,interval){
+  count=Math.min(count||100,200); interval=interval||'1h';
+  var proxy=getProxyUrl(); if(!proxy) return null;
+  var url=proxy+'/api/v3/klines?symbol='+symbol+'&interval='+interval+'&limit='+count;
+  try{
+    var res=await fetchWithTimeout(url,{},7000);
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    var data=await res.json();
+    if(!Array.isArray(data)) throw new Error('형식 오류');
+    return data.map(function(c){return{
+      time:parseInt(c[0]),open:parseFloat(c[1]),high:parseFloat(c[2]),
+      low:parseFloat(c[3]),close:parseFloat(c[4]),
+      volume:parseFloat(c[5]),quoteVolume:parseFloat(c[7])
+    };});
+  }catch(e){addLog('[BINANCE] '+symbol+' 실패: '+e.message,'err');return null;}
 }
 
-async function fetchBinanceTickers(symbols) {
-  var proxy = getProxyUrl();
-  if (!proxy) return {};
-  try {
-    var symParam = encodeURIComponent(JSON.stringify(symbols));
-    var res = await fetchWithTimeout(proxy + '/api/v3/ticker/24hr?symbols=' + symParam, {}, 10000);
-    if (!res.ok) {
-      var res2 = await fetchWithTimeout(proxy + '/api/v3/ticker/24hr', {}, 12000);
-      if (!res2.ok) throw new Error('HTTP ' + res2.status);
-      var all = await res2.json();
-      var symSet = {}; symbols.forEach(function(s){ symSet[s]=true; });
-      var map2 = {};
-      (Array.isArray(all)?all:[all]).forEach(function(t) {
-        if (symSet[t.symbol]) map2[t.symbol] = {
-          currentPrice: parseFloat(t.lastPrice),
-          change24h:    parseFloat(t.priceChangePercent),
-          volume24h:    parseFloat(t.volume),
-          quoteVolume:  parseFloat(t.quoteVolume)
+async function fetchBinanceTickers(symbols){
+  var proxy=getProxyUrl(); if(!proxy) return {};
+  try{
+    var symParam=encodeURIComponent(JSON.stringify(symbols));
+    var res=await fetchWithTimeout(proxy+'/api/v3/ticker/24hr?symbols='+symParam,{},10000);
+    if(!res.ok){
+      var res2=await fetchWithTimeout(proxy+'/api/v3/ticker/24hr',{},12000);
+      if(!res2.ok) throw new Error('HTTP '+res2.status);
+      var all=await res2.json();
+      var symSet={};symbols.forEach(function(s){symSet[s]=true;});
+      var map2={};
+      (Array.isArray(all)?all:[all]).forEach(function(t){
+        if(symSet[t.symbol]) map2[t.symbol]={
+          currentPrice:parseFloat(t.lastPrice),change24h:parseFloat(t.priceChangePercent),
+          volume24h:parseFloat(t.volume),quoteVolume:parseFloat(t.quoteVolume)
         };
       });
       return map2;
     }
-    var data = await res.json();
-    var map = {};
-    (Array.isArray(data)?data:[data]).forEach(function(t) {
-      map[t.symbol] = {
-        currentPrice: parseFloat(t.lastPrice),
-        change24h:    parseFloat(t.priceChangePercent),
-        volume24h:    parseFloat(t.volume),
-        quoteVolume:  parseFloat(t.quoteVolume)
-      };
+    var data=await res.json();
+    var map={};
+    (Array.isArray(data)?data:[data]).forEach(function(t){
+      map[t.symbol]={currentPrice:parseFloat(t.lastPrice),change24h:parseFloat(t.priceChangePercent),
+                     volume24h:parseFloat(t.volume),quoteVolume:parseFloat(t.quoteVolume)};
     });
     return map;
-  } catch(e) { addLog('[BINANCE] Ticker 실패: ' + e.message, 'warn'); return {}; }
+  }catch(e){addLog('[BINANCE] Ticker 실패: '+e.message,'warn');return{};}
 }
 
-// ── 캔들 정규화 ───────────────────────────────────────────────────
-function normalizeCandles(candles) {
-  if (!Array.isArray(candles) || candles.length < 3) return [];
-  return candles.filter(function(c){ return c && c.close > 0 && !isNaN(c.close); })
-                .sort(function(a,b){ return a.time - b.time; });
+function normalizeCandles(candles){
+  if(!Array.isArray(candles)||candles.length<3) return [];
+  return candles.filter(function(c){return c&&c.close>0&&!isNaN(c.close);})
+                .sort(function(a,b){return a.time-b.time;});
+}
+
+// ══════════════════════════════════════════════════════════════════
+// [전면 재설계] B. buildDynamicTopBases
+// 업비트 전체 KRW 마켓 기반 동적 후보 선정
+// "자금 유입 + 구조 정상 + 급등 전 가능성" 기준
+// ══════════════════════════════════════════════════════════════════
+function buildDynamicTopBases(symbolCount, upbitTickerMap, binanceTickerMap){
+  var candidates=[];
+
+  // upbitTickerMap: { 'KRW-BTC': ticker, 'KRW-BLUR': ticker, ... }
+  Object.keys(upbitTickerMap).forEach(function(market){
+    if(!market.startsWith('KRW-')) return;
+    var t=upbitTickerMap[market];
+    if(!t) return;
+
+    var base=market.replace('KRW-','');
+    var score=0;
+
+    // ① 거래대금 점수 (자금 유입 없는 코인 배제)
+    var tradeValue=t.acc_trade_price_24h||0;
+    if(tradeValue<500000000) return; // 5억 미만 제외 (유동성 부족)
+    // 로그스케일로 정규화 (100억=1점, 1000억=2점, 1조=3점)
+    var tvScore=Math.min(Math.log10(Math.max(tradeValue/1e9,1)),4);
+    score+=tvScore; // 최대 4점
+
+    // ② 변동성 점수 (절대 변동률 — 방향 무관)
+    var changeRate=Math.abs(t.signed_change_rate*100||0);
+    // 1~15% 구간 가산, 15% 초과는 과열 패널티에서 처리
+    if(changeRate>=1&&changeRate<15) score+=Math.min(changeRate/5,2); // 최대 2점
+
+    // ③ 거래량 증가율 점수 (Ticker 레벨 — 캔들 없이 추산)
+    // acc_trade_volume_24h를 시가총액 대비로 보기 어려우므로
+    // 거래대금 대비 단위당 변동성을 proxy로 사용
+    var volProxy=tradeValue>0?changeRate/(tradeValue/1e11):0;
+    score+=Math.min(volProxy,1.5); // 최대 1.5점
+
+    // ④ 바이낸스 동시 상장 보너스 (글로벌 동조성)
+    var binanceKey=SYMBOL_MAP[base];
+    var bTicker=binanceKey?binanceTickerMap[binanceKey]:null;
+    if(bTicker){
+      score+=1.5; // 글로벌 거래소 동시 상장 보너스
+      // 바이낸스에서도 거래량 증가 중이면 추가 가산
+      if(Math.abs(bTicker.change24h)>1) score+=0.5;
+    }
+
+    // ⑤ 과열 패널티 (절대 상승률 기준 — Ticker 레벨 1차 필터)
+    // 단, 이건 단순 필터용이고 정밀 과열 판정은 breakoutStrength 기준
+    if(changeRate>20) score-=2; // 20% 이상 급등 → 막차 위험
+    if(changeRate>30) score-=2; // 30% 이상 → 추가 패널티
+
+    // ⑥ RSI는 Ticker 레벨에서 없으므로 스킵 (analyzeSymbol에서 정밀 계산)
+
+    candidates.push({
+      base:base, market:market,
+      preScore:parseFloat(score.toFixed(3)),
+      tradeValue:tradeValue,
+      changeRate:t.signed_change_rate*100||0,
+      hasBinance:!!bTicker
+    });
+  });
+
+  // 1차: preScore 내림차순 정렬
+  candidates.sort(function(a,b){return b.preScore-a.preScore;});
+
+  // 최종: 상위 symbolCount개의 base 심볼 반환
+  var topBases=candidates.slice(0,symbolCount).map(function(x){return x.base;});
+  addLog('[선정] '+topBases.length+'개 후보: '+topBases.slice(0,10).join(', ')+(topBases.length>10?'...':''),'info');
+  return topBases;
 }
 
 // ══════════════════════════════════════════════════════════════════
 // 지표 계산 엔진
 // ══════════════════════════════════════════════════════════════════
 
-// ── RSI ───────────────────────────────────────────────────────────
-function calcRSI(closes, period) {
-  period = period || 14;
-  if (closes.length < period + 1) return 50;
-  var changes = [];
-  for (var i = 1; i < closes.length; i++) changes.push(closes[i] - closes[i-1]);
-  var avgGain = 0, avgLoss = 0;
-  for (var i = 0; i < period; i++) {
-    if (changes[i] >= 0) avgGain += changes[i]; else avgLoss += Math.abs(changes[i]);
+function calcRSI(closes,period){
+  period=period||14;
+  if(closes.length<period+1) return 50;
+  var changes=[];
+  for(var i=1;i<closes.length;i++) changes.push(closes[i]-closes[i-1]);
+  var avgGain=0,avgLoss=0;
+  for(var i=0;i<period;i++){
+    if(changes[i]>=0) avgGain+=changes[i]; else avgLoss+=Math.abs(changes[i]);
   }
-  avgGain /= period; avgLoss /= period;
-  for (var i = period; i < changes.length; i++) {
-    var g = changes[i] >= 0 ? changes[i] : 0;
-    var l = changes[i] < 0 ? Math.abs(changes[i]) : 0;
-    avgGain = (avgGain*(period-1)+g)/period;
-    avgLoss = (avgLoss*(period-1)+l)/period;
+  avgGain/=period; avgLoss/=period;
+  for(var i=period;i<changes.length;i++){
+    var g=changes[i]>=0?changes[i]:0;
+    var l=changes[i]<0?Math.abs(changes[i]):0;
+    avgGain=(avgGain*(period-1)+g)/period;
+    avgLoss=(avgLoss*(period-1)+l)/period;
   }
-  if (avgLoss === 0) return 100;
-  return parseFloat((100 - 100/(1+avgGain/avgLoss)).toFixed(2));
+  if(avgLoss===0) return 100;
+  return parseFloat((100-100/(1+avgGain/avgLoss)).toFixed(2));
 }
 
-// ── OBV ───────────────────────────────────────────────────────────
-function calcOBV(candles) {
-  if (candles.length < 2) return { series:[], trend:'flat', slope:0, leading:false, divergence:false };
-  var series = [0];
-  for (var i = 1; i < candles.length; i++) {
-    var prev = series[series.length-1];
-    if (candles[i].close > candles[i-1].close)       series.push(prev + candles[i].volume);
-    else if (candles[i].close < candles[i-1].close)  series.push(prev - candles[i].volume);
-    else                                               series.push(prev);
+function calcOBV(candles){
+  if(candles.length<2) return{series:[],trend:'flat',slope:0,leading:false,divergence:false};
+  var series=[0];
+  for(var i=1;i<candles.length;i++){
+    var prev=series[series.length-1];
+    if(candles[i].close>candles[i-1].close) series.push(prev+candles[i].volume);
+    else if(candles[i].close<candles[i-1].close) series.push(prev-candles[i].volume);
+    else series.push(prev);
   }
-  var recent = series.slice(-20), n = recent.length;
+  var recent=series.slice(-20),n=recent.length;
   var sumX=0,sumY=0,sumXY=0,sumX2=0;
-  for (var i=0;i<n;i++){sumX+=i;sumY+=recent[i];sumXY+=i*recent[i];sumX2+=i*i;}
-  var slope = (n*sumXY-sumX*sumY)/(n*sumX2-sumX*sumX);
-  var avgOBV = Math.abs(sumY/n)||1;
-  var ns = slope/avgOBV;
-  var trend = ns>0.005?'up':ns<-0.005?'down':'flat';
-  var priceChange = candles.length>=20
-    ? (candles[candles.length-1].close - candles[candles.length-20].close)/candles[candles.length-20].close
-    : 0;
-  var obvChange = n>1 ? (recent[n-1]-recent[0])/(Math.abs(recent[0])||1) : 0;
-  var leading    = obvChange > priceChange * 1.3;
-  var divergence = priceChange > 0.02 && obvChange < -0.01;
-  return { series:series, trend:trend, slope:ns, leading:leading, divergence:divergence };
+  for(var i=0;i<n;i++){sumX+=i;sumY+=recent[i];sumXY+=i*recent[i];sumX2+=i*i;}
+  var slope=(n*sumXY-sumX*sumY)/(n*sumX2-sumX*sumX);
+  var avgOBV=Math.abs(sumY/n)||1,ns=slope/avgOBV;
+  var trend=ns>0.005?'up':ns<-0.005?'down':'flat';
+  var priceChange=candles.length>=20
+    ?(candles[candles.length-1].close-candles[candles.length-20].close)/candles[candles.length-20].close:0;
+  var obvChange=n>1?(recent[n-1]-recent[0])/(Math.abs(recent[0])||1):0;
+  var leading=obvChange>priceChange*1.3;
+  var divergence=priceChange>0.02&&obvChange<-0.01;
+  return{series,trend,slope:ns,leading,divergence};
 }
 
-// ── MFI ───────────────────────────────────────────────────────────
-function calcMFI(candles, period) {
-  period = period || 14;
-  if (candles.length < period + 1) return 50;
-  var posFlow = 0, negFlow = 0;
-  var prevTP = (candles[candles.length-period-1].high + candles[candles.length-period-1].low + candles[candles.length-period-1].close) / 3;
-  for (var i = candles.length - period; i < candles.length; i++) {
-    var tp = (candles[i].high + candles[i].low + candles[i].close) / 3;
-    var mf = tp * candles[i].volume;
-    if (tp > prevTP) posFlow += mf; else negFlow += mf;
-    prevTP = tp;
+function calcMFI(candles,period){
+  period=period||14;
+  if(candles.length<period+1) return 50;
+  var posFlow=0,negFlow=0;
+  var prevTP=(candles[candles.length-period-1].high+candles[candles.length-period-1].low+candles[candles.length-period-1].close)/3;
+  for(var i=candles.length-period;i<candles.length;i++){
+    var tp=(candles[i].high+candles[i].low+candles[i].close)/3;
+    var mf=tp*candles[i].volume;
+    if(tp>prevTP) posFlow+=mf; else negFlow+=mf;
+    prevTP=tp;
   }
-  if (negFlow === 0) return 100;
-  return parseFloat((100 - 100/(1+posFlow/negFlow)).toFixed(2));
+  if(negFlow===0) return 100;
+  return parseFloat((100-100/(1+posFlow/negFlow)).toFixed(2));
 }
 
-// ── EMA / MACD ────────────────────────────────────────────────────
-function calcEMA(data, period) {
-  if (data.length < period) return [];
-  var k = 2/(period+1);
-  var sum = 0; for (var i=0;i<period;i++) sum+=data[i];
-  var ema = [sum/period];
-  for (var i=period;i<data.length;i++) ema.push(data[i]*k+ema[ema.length-1]*(1-k));
+function calcEMA(data,period){
+  if(data.length<period) return[];
+  var k=2/(period+1),sum=0;
+  for(var i=0;i<period;i++) sum+=data[i];
+  var ema=[sum/period];
+  for(var i=period;i<data.length;i++) ema.push(data[i]*k+ema[ema.length-1]*(1-k));
   return ema;
 }
 
-function calcMACD(closes) {
-  if (closes.length < 35) return { macd:0,signal:0,histogram:0,crossType:'none',histTrend:'flat' };
-  var ema12=calcEMA(closes,12), ema26=calcEMA(closes,26);
-  var offset=26-12;
+function calcMACD(closes){
+  if(closes.length<35) return{macd:0,signal:0,histogram:0,crossType:'none',histTrend:'flat'};
+  var ema12=calcEMA(closes,12),ema26=calcEMA(closes,26),offset=26-12;
   var macdLine=ema26.map(function(v,i){return ema12[i+offset]-v;});
   var sigLine=calcEMA(macdLine,9);
   var sigOff=macdLine.length-sigLine.length;
@@ -1315,351 +1300,340 @@ function calcMACD(closes) {
   var lH=hists[hists.length-1],pH=hists[hists.length-2]||0,p2H=hists[hists.length-3]||0;
   var pM=macdLine[macdLine.length-2]||0,pS=sigLine[sigLine.length-2]||0;
   var cross='none';
-  if (pM<=pS&&lM>lS) cross='golden';
-  else if (pM>=pS&&lM<lS) cross='dead';
-  else if (lM>lS) cross='golden_hold';
+  if(pM<=pS&&lM>lS) cross='golden';
+  else if(pM>=pS&&lM<lS) cross='dead';
+  else if(lM>lS) cross='golden_hold';
   var histTrend='flat';
-  if (lH>pH&&pH>p2H) histTrend='improving';
-  else if (lH<pH&&pH<p2H) histTrend='worsening';
-  else if (lH>pH) histTrend='improving';
-  return { macd:parseFloat(lM.toFixed(6)),signal:parseFloat(lS.toFixed(6)),
-           histogram:parseFloat(lH.toFixed(6)),crossType:cross,histTrend:histTrend };
+  if(lH>pH&&pH>p2H) histTrend='improving';
+  else if(lH<pH&&pH<p2H) histTrend='worsening';
+  else if(lH>pH) histTrend='improving';
+  return{macd:parseFloat(lM.toFixed(6)),signal:parseFloat(lS.toFixed(6)),
+         histogram:parseFloat(lH.toFixed(6)),crossType:cross,histTrend};
 }
 
 // ══════════════════════════════════════════════════════════════════
-// [핵심 수정] 2. calcVolumeSpike — 3캔들 평균 기준으로 교체
-// 단일 캔들 기준의 노이즈 제거
+// [수정] C. calcVolumeSpike — 3캔들 평균 기준 (1캔들 기준 완전 제거)
 // ══════════════════════════════════════════════════════════════════
-function calcVolumeSpike(volumes, avgPeriod) {
-  avgPeriod = avgPeriod || 20;
-  if (volumes.length < avgPeriod + 3) return { ratio:1, isSpike:false, trend:'flat' };
+function calcVolumeSpike(volumes,avgPeriod){
+  avgPeriod=avgPeriod||20;
+  if(volumes.length<avgPeriod+3) return{ratio:1,isSpike:false,trend:'flat',gradual:false};
 
   // 최근 3캔들 평균 (노이즈 제거)
-  var cur3 = volumes.slice(-3);
-  var cur  = cur3.reduce(function(a,b){return a+b;},0) / cur3.length;
+  var cur3=volumes.slice(-3);
+  var cur=cur3.reduce(function(a,b){return a+b;},0)/cur3.length;
 
-  // 이전 avgPeriod-3 캔들 평균 (비교 기준)
-  var prev = volumes.slice(-avgPeriod-3, -3);
-  if (prev.length === 0) return { ratio:1, isSpike:false, trend:'flat' };
-  var avg  = prev.reduce(function(a,b){return a+b;},0) / prev.length;
+  // 이전 구간 평균 (비교 기준 — 3캔들 이전부터 avgPeriod개)
+  var prevSlice=volumes.slice(-avgPeriod-3,-3);
+  if(prevSlice.length===0) return{ratio:1,isSpike:false,trend:'flat',gradual:false};
+  var avg=prevSlice.reduce(function(a,b){return a+b;},0)/prevSlice.length;
 
-  var ratio = avg > 0 ? cur / avg : 1;
+  var ratio=avg>0?cur/avg:1;
 
-  // 추세: 최근 5캔들 거래량 방향
-  var last5 = volumes.slice(-5), inc = 0;
-  for (var i=1;i<last5.length;i++) if(last5[i]>last5[i-1]) inc++;
-  var trend = inc>=3?'increasing':inc<=1?'decreasing':'flat';
+  // 추세: 최근 5캔들 방향
+  var last5=volumes.slice(-5),inc=0;
+  for(var i=1;i<last5.length;i++) if(last5[i]>last5[i-1]) inc++;
+  var trend=inc>=3?'increasing':inc<=1?'decreasing':'flat';
 
-  return {
-    ratio:   parseFloat(ratio.toFixed(2)),
-    isSpike: ratio >= 1.5,
-    trend:   trend,
-    // 점진적 증가 여부 (PRE-PUMP 탐지에 활용)
-    gradual: trend === 'increasing' && ratio >= 1.1 && ratio < 1.8
-  };
+  // 점진적 증가 (PRE-PUMP 핵심 신호: 폭발 아닌 서서히 붙는 거래량)
+  var gradual=(trend==='increasing')&&ratio>=1.1&&ratio<1.8;
+
+  return{ratio:parseFloat(ratio.toFixed(2)),isSpike:ratio>=1.5,trend,gradual};
 }
 
-// ── 박스권 계산 ───────────────────────────────────────────────────
-function calcBoxRange(candles, boxPeriod) {
-  boxPeriod = boxPeriod || Math.min(40, Math.max(15, Math.floor(candles.length * 0.2)));
-  var c = candles[candles.length-1];
-  if (candles.length < boxPeriod) {
-    return { high:c.close,low:c.close,range:0,rangePercent:0,currentClose:c.close,
-             distanceToTop:0,distanceToBot:0,isNearTop:false,isBreakout:false,
-             isSideways:false,breakoutStrength:0,boxPeriod:boxPeriod };
-  }
-  var box = candles.slice(-boxPeriod-1,-1);
-  var bH  = Math.max.apply(null, box.map(function(x){return x.high;}));
-  var bL  = Math.min.apply(null, box.map(function(x){return x.low;}));
-  var cur = c.close, range=bH-bL, rangePct=bL>0?(range/bL)*100:0;
-  var dTop=bH>0?((bH-cur)/bH)*100:0, dBot=bL>0?((cur-bL)/bL)*100:0;
+function calcBoxRange(candles,boxPeriod){
+  boxPeriod=boxPeriod||Math.min(40,Math.max(15,Math.floor(candles.length*0.2)));
+  var c=candles[candles.length-1];
+  if(candles.length<boxPeriod)
+    return{high:c.close,low:c.close,range:0,rangePercent:0,currentClose:c.close,
+           distanceToTop:0,distanceToBot:0,isNearTop:false,isBreakout:false,
+           isSideways:false,breakoutStrength:0,boxPeriod};
+  var box=candles.slice(-boxPeriod-1,-1);
+  var bH=Math.max.apply(null,box.map(function(x){return x.high;}));
+  var bL=Math.min.apply(null,box.map(function(x){return x.low;}));
+  var cur=c.close,range=bH-bL,rangePct=bL>0?(range/bL)*100:0;
+  var dTop=bH>0?((bH-cur)/bH)*100:0,dBot=bL>0?((cur-bL)/bL)*100:0;
   var bStr=cur>bH?((cur-bH)/bH)*100:0;
-  return {
+  return{
     high:parseFloat(bH.toFixed(2)),low:parseFloat(bL.toFixed(2)),
     range:parseFloat(range.toFixed(2)),rangePercent:parseFloat(rangePct.toFixed(2)),
     currentClose:cur,
     distanceToTop:parseFloat(dTop.toFixed(2)),distanceToBot:parseFloat(dBot.toFixed(2)),
-    isNearTop:dTop>=0&&dTop<=3,
-    isBreakout:cur>bH,
+    isNearTop:dTop>=0&&dTop<=3,isBreakout:cur>bH,
     isSideways:rangePct<15&&rangePct>2,
-    breakoutStrength:parseFloat(bStr.toFixed(2)),
-    boxPeriod:boxPeriod
+    breakoutStrength:parseFloat(bStr.toFixed(2)),boxPeriod
   };
 }
 
-// ── ATR / 진입·손절·목표가 ────────────────────────────────────────
-function calcATR(candles, period) {
-  period = period || 14;
-  if (candles.length < period+1) return candles[candles.length-1].high - candles[candles.length-1].low;
+function calcATR(candles,period){
+  period=period||14;
+  if(candles.length<period+1) return candles[candles.length-1].high-candles[candles.length-1].low;
   var trues=[];
-  for (var i=1;i<candles.length;i++) {
+  for(var i=1;i<candles.length;i++){
     var h=candles[i].high,l=candles[i].low,pc=candles[i-1].close;
     trues.push(Math.max(h-l,Math.abs(h-pc),Math.abs(l-pc)));
   }
   var atr=trues.slice(0,period).reduce(function(a,b){return a+b;},0)/period;
-  for (var i=period;i<trues.length;i++) atr=(atr*(period-1)+trues[i])/period;
+  for(var i=period;i<trues.length;i++) atr=(atr*(period-1)+trues[i])/period;
   return parseFloat(atr.toFixed(6));
 }
 
-function calcEntryTargets(candles, boxResult) {
+function calcEntryTargets(candles,boxResult){
   var cur=candles[candles.length-1].close;
-  var atr=calcATR(candles,14);
-  var atrP=cur>0?(atr/cur)*100:1;
-  var stopLoss = boxResult.low - (atr * 0.5); // 휩쏘 대응 넉넉한 손절
-  var risk=cur-stopLoss;
-  var stopPct=cur>0?((cur-stopLoss)/cur)*100:0;
-  return {
-    entry:parseFloat(cur.toFixed(2)),
-    stopLoss:parseFloat(stopLoss.toFixed(2)),
+  var atr=calcATR(candles,14),atrP=cur>0?(atr/cur)*100:1;
+  var stopLoss=boxResult.low-(atr*0.5); // 휩쏘 대응 넉넉한 손절
+  var risk=cur-stopLoss,stopPct=cur>0?((cur-stopLoss)/cur)*100:0;
+  return{
+    entry:parseFloat(cur.toFixed(2)),stopLoss:parseFloat(stopLoss.toFixed(2)),
     target1:parseFloat((cur+risk*1.5).toFixed(2)),
     target2:parseFloat((cur+risk*2.5).toFixed(2)),
     target3:parseFloat((cur+risk*4.0).toFixed(2)),
-    riskReward:2.5, atr:parseFloat(atr.toFixed(4)),
-    atrPct:parseFloat(atrP.toFixed(2)),
-    stopPercent:parseFloat(stopPct.toFixed(2))
+    riskReward:2.5,atr:parseFloat(atr.toFixed(4)),
+    atrPct:parseFloat(atrP.toFixed(2)),stopPercent:parseFloat(stopPct.toFixed(2))
   };
 }
 
-// ── BTC 기준 캔들 ─────────────────────────────────────────────────
-var btcCandleCache = null;
-
-async function loadBTCCandles(count) {
-  if (btcCandleCache && btcCandleCache.length >= 10) return btcCandleCache;
-  addLog('[BTC] 기준 캔들 수집 중...', 'info');
-  var raw = await fetchUpbitCandles('KRW-BTC', count);
-  btcCandleCache = normalizeCandles(raw);
-  addLog('[BTC] 기준 캔들 ' + btcCandleCache.length + '개 완료', 'ok');
+var btcCandleCache=null;
+async function loadBTCCandles(count){
+  if(btcCandleCache&&btcCandleCache.length>=10) return btcCandleCache;
+  addLog('[BTC] 기준 캔들 수집...','info');
+  var raw=await fetchUpbitCandles('KRW-BTC',count);
+  btcCandleCache=normalizeCandles(raw);
+  addLog('[BTC] '+btcCandleCache.length+'개 완료','ok');
   return btcCandleCache;
 }
 
-// ── BTC 거시 필터 ─────────────────────────────────────────────────
-function calcBTCFilter(btcCandles) {
-  if (!btcCandles || btcCandles.length < 30) return { trend:'unknown', penalty:0, desc:'' };
-  var closes = btcCandles.map(function(c){ return c.close; });
-  var rsi = calcRSI(closes, 14);
-  var macd = calcMACD(closes);
-  var penalty = 0, descs = [];
-  if (rsi < 42) { penalty += 1.5; descs.push('BTC RSI 약세('+rsi.toFixed(1)+')'); }
-  else if (rsi < 48) { penalty += 0.5; descs.push('BTC RSI 중립이하'); }
-  if (macd.crossType === 'dead') { penalty += 2; descs.push('BTC MACD 데드크로스'); }
-  else if (macd.histTrend === 'worsening') { penalty += 0.5; descs.push('BTC MACD 악화'); }
-  var trend = penalty >= 2 ? 'bear' : penalty >= 0.5 ? 'neutral' : 'bull';
-  return { trend:trend, penalty:parseFloat(penalty.toFixed(1)), desc:descs.join(' / '), rsi:rsi, macd:macd };
+function calcBTCFilter(btcCandles){
+  if(!btcCandles||btcCandles.length<30) return{trend:'unknown',penalty:0,desc:''};
+  var closes=btcCandles.map(function(c){return c.close;});
+  var rsi=calcRSI(closes,14),macd=calcMACD(closes);
+  var penalty=0,descs=[];
+  if(rsi<42){penalty+=1.5;descs.push('BTC RSI 약세('+rsi.toFixed(1)+')');}
+  else if(rsi<48){penalty+=0.5;descs.push('BTC RSI 중립이하');}
+  if(macd.crossType==='dead'){penalty+=2;descs.push('BTC MACD 데드크로스');}
+  else if(macd.histTrend==='worsening'){penalty+=0.5;descs.push('BTC MACD 악화');}
+  var trend=penalty>=2?'bear':penalty>=0.5?'neutral':'bull';
+  return{trend,penalty:parseFloat(penalty.toFixed(1)),desc:descs.join(' / '),rsi,macd};
 }
 
-// ── BTC 상대강도 ──────────────────────────────────────────────────
-function calcRelativeStrength(coinCloses, btcCloses, period) {
-  period = period || 50;
-  if (coinCloses.length < 2 || btcCloses.length < 2) return { relStrength:1,isStronger:false,diff:0 };
+function calcRelativeStrength(coinCloses,btcCloses,period){
+  period=period||50;
+  if(coinCloses.length<2||btcCloses.length<2) return{relStrength:1,isStronger:false,diff:0};
   var n=Math.min(coinCloses.length,btcCloses.length,period);
   var cS=coinCloses[coinCloses.length-n],cE=coinCloses[coinCloses.length-1];
   var bS=btcCloses[btcCloses.length-n],bE=btcCloses[btcCloses.length-1];
-  if (cS<=0||bS<=0) return { relStrength:1,isStronger:false,diff:0 };
-  var cR=(cE-cS)/cS, bR=(bE-bS)/bS;
+  if(cS<=0||bS<=0) return{relStrength:1,isStronger:false,diff:0};
+  var cR=(cE-cS)/cS,bR=(bE-bS)/bS;
   var rs=bR!==0?(1+cR)/(1+bR):1;
-  return { relStrength:parseFloat(rs.toFixed(4)), isStronger:rs>1.05, diff:parseFloat(((cR-bR)*100).toFixed(2)) };
+  return{relStrength:parseFloat(rs.toFixed(4)),isStronger:rs>1.05,diff:parseFloat(((cR-bR)*100).toFixed(2))};
 }
 
-// ── 유동성 흡수 ───────────────────────────────────────────────────
-function detectLiquidityAbsorption(candles, lookback) {
+function detectLiquidityAbsorption(candles,lookback){
   lookback=lookback||5;
-  if (candles.length<lookback+3) return { detected:false,strength:'none',desc:'' };
+  if(candles.length<lookback+3) return{detected:false,strength:'none',desc:''};
   var prev=candles.slice(-lookback-1,-1);
   var prevLow=Math.min.apply(null,prev.map(function(c){return c.low;}));
   var last=candles[candles.length-1];
   var prevAvgVol=prev.reduce(function(a,c){return a+c.volume;},0)/prev.length;
-  var totalRange=last.high-last.low, lowerWick=last.close-last.low;
+  var totalRange=last.high-last.low,lowerWick=last.close-last.low;
   var wickRatio=totalRange>0?lowerWick/totalRange:0;
   var score=(last.low<prevLow?1:0)+(last.close>prevLow?1:0)+(wickRatio>0.5?1:0)+(last.volume>prevAvgVol*1.3?1:0);
-  if (score>=3&&last.low<prevLow&&last.close>prevLow)
-    return { detected:true,strength:score===4?'strong':'moderate',desc:'하단 유동성 흡수 후 반등 가능성' };
-  return { detected:false,strength:'none',desc:'' };
+  if(score>=3&&last.low<prevLow&&last.close>prevLow)
+    return{detected:true,strength:score===4?'strong':'moderate',desc:'하단 유동성 흡수 후 반등 가능성'};
+  return{detected:false,strength:'none',desc:''};
 }
 
-// ── 페이크 돌파 ───────────────────────────────────────────────────
-function detectFakeBreakout(candles, lookback) {
+function detectFakeBreakout(candles,lookback){
   lookback=lookback||5;
-  if (candles.length<lookback+1) return { warned:false,level:'none',desc:'' };
-  var last=candles[candles.length-1], warns=[];
+  if(candles.length<lookback+1) return{warned:false,level:'none',desc:''};
+  var last=candles[candles.length-1],warns=[];
   var totalRange=last.high-last.low;
   var upperWick=last.high-Math.max(last.open,last.close);
-  if (totalRange>0&&upperWick/totalRange>0.5) warns.push('윗꼬리 과다('+Math.round(upperWick/totalRange*100)+'%)');
+  if(totalRange>0&&upperWick/totalRange>0.5) warns.push('윗꼬리 과다('+Math.round(upperWick/totalRange*100)+'%)');
   var prevHighs=candles.slice(-lookback-1,-1).map(function(c){return c.high;});
   var prevBoxHigh=Math.max.apply(null,prevHighs);
-  if (last.high>prevBoxHigh&&last.close<prevBoxHigh) warns.push('박스 상단 돌파 후 종가 밀림');
-  if (!warns.length) return { warned:false,level:'none',desc:'' };
-  return { warned:true,level:warns.length>=2?'high':'moderate',desc:warns.join(' / ') };
+  if(last.high>prevBoxHigh&&last.close<prevBoxHigh) warns.push('박스 상단 돌파 후 종가 밀림');
+  if(!warns.length) return{warned:false,level:'none',desc:''};
+  return{warned:true,level:warns.length>=2?'high':'moderate',desc:warns.join(' / ')};
 }
 
-// ── PRE-PUMP 탐지 ─────────────────────────────────────────────────
-function detectPrePump(indicators) {
-  var obv=indicators.obv, vol=indicators.volumeSpike;
-  var rsi=indicators.rsi, box=indicators.boxRange;
-  var conditions = [
-    obv.leading && obv.trend === 'up',       // OBV 선행 상승
-    vol.ratio < 1.5 && vol.ratio > 0.8,      // 거래량 미폭발 (gradual 포함)
-    box.isSideways,                           // 박스권 횡보
-    rsi >= 48 && rsi <= 58,                  // RSI 중립
+// ══════════════════════════════════════════════════════════════════
+// [강화] D. PRE-PUMP 감지 — 실제 선행 탐지 로직
+// "박스 안에 있고, 아직 안 터졌지만, OBV와 거래량이 먼저 붙는 상태"
+// ══════════════════════════════════════════════════════════════════
+function detectPrePump(indicators){
+  var obv=indicators.obv,vol=indicators.volumeSpike;
+  var rsi=indicators.rsi,box=indicators.boxRange,fake=indicators.fakeBreakout;
+
+  // 필수 조건 (모두 충족해야 PRE-PUMP 후보)
+  var required=[
+    box.isSideways===true,           // 박스권 횡보 중
+    box.isBreakout===false,           // 아직 돌파 안 함
+    box.distanceToTop<5,              // 상단 5% 이내 위치 (돌파 직전)
+    obv.trend==='up',                 // OBV 상승 중
+    vol.ratio>=1.2,                   // 거래량 소폭 증가 (폭발 전)
+    rsi>=45&&rsi<=68,                 // RSI 중립~약간 과열 전
+    !fake.warned,                     // 페이크 돌파 아님
   ];
-  var count = conditions.filter(Boolean).length;
-  return { detected: count >= 3, count: count };
+
+  var reqCount=required.filter(Boolean).length;
+  var reqMet=reqCount>=5; // 7개 중 5개 이상
+
+  // 가산 조건 (충족하면 신뢰도 up)
+  var bonus=0;
+  if(obv.leading) bonus++;           // OBV 가격 선행 = 가장 강한 PRE-PUMP 신호
+  if(vol.gradual) bonus++;           // 점진적 거래량 증가 (급등 아닌 축적)
+  if(box.distanceToTop<3) bonus++;   // 상단 3% 이내 = 돌파 임박
+  if(rsi>=50&&rsi<=60) bonus++;      // RSI 50~60 = 가장 이상적 진입 구간
+
+  return{
+    detected:reqMet,
+    count:reqCount,
+    bonus:bonus,
+    // 신뢰도: 필수+가산 종합
+    confidence: reqMet ? (reqCount-5)*0.5 + bonus*0.25 : 0
+  };
 }
 
-// ── 위험도 판정 ───────────────────────────────────────────────────
-function calcRiskLevel(targets, rsi, fakeBreakout, volumeSpike) {
-  var score=0, reasons=new Set();
-  if (rsi>75)      { score+=2; reasons.add('RSI 과열권('+rsi.toFixed(1)+')'); }
-  else if (rsi>65) { score+=1; reasons.add('RSI 고점 주의('+rsi.toFixed(1)+')'); }
-  if (targets.stopPercent>10) { score+=2; reasons.add('손절 거리 과다('+targets.stopPercent.toFixed(1)+'%)'); }
-  else if (targets.stopPercent>6) { score+=1; reasons.add('손절 거리 보통('+targets.stopPercent.toFixed(1)+'%)'); }
-  if (targets.atrPct>5) { score+=1; reasons.add('고변동성(ATR '+targets.atrPct+'%)'); }
-  if (fakeBreakout.warned) { score+=fakeBreakout.level==='high'?2:1; reasons.add(fakeBreakout.desc); }
-  if (volumeSpike.ratio>3&&volumeSpike.trend!=='increasing') { score+=1; reasons.add('거래량 급증 단발성 가능'); }
-  return { level:score>=4?'높음':score>=2?'보통':'낮음', score:score, reasons:Array.from(reasons) };
+function calcRiskLevel(targets,rsi,fakeBreakout,volumeSpike){
+  var score=0,reasons=new Set();
+  if(rsi>75){score+=2;reasons.add('RSI 과열권('+rsi.toFixed(1)+')');}
+  else if(rsi>65){score+=1;reasons.add('RSI 고점 주의('+rsi.toFixed(1)+')');}
+  if(targets.stopPercent>10){score+=2;reasons.add('손절 거리 과다('+targets.stopPercent.toFixed(1)+'%)');}
+  else if(targets.stopPercent>6){score+=1;reasons.add('손절 거리 보통('+targets.stopPercent.toFixed(1)+'%)');}
+  if(targets.atrPct>5){score+=1;reasons.add('고변동성(ATR '+targets.atrPct+'%)');}
+  if(fakeBreakout.warned){score+=fakeBreakout.level==='high'?2:1;reasons.add(fakeBreakout.desc);}
+  if(volumeSpike.ratio>3&&volumeSpike.trend!=='increasing'){score+=1;reasons.add('거래량 급증 단발성');}
+  return{level:score>=4?'높음':score>=2?'보통':'낮음',score,reasons:Array.from(reasons)};
 }
 
 // ══════════════════════════════════════════════════════════════════
-// [핵심 수정] 3. calcCompositeScore — PRE-PUMP 실제 점수 반영
-//             + 박스 돌파 기준 과열 감점 (단순 상승률 감점 제거)
+// [수정] E. calcCompositeScore
+// PRE-PUMP 실제 점수 반영 + breakoutStrength 기반 과열 감점
+// 단순 change24h 감점 완전 제거
 // ══════════════════════════════════════════════════════════════════
-function calcCompositeScore(ind, btcFilter, prePump) {
-  var rsi=ind.rsi, obv=ind.obv, macd=ind.macd;
-  var vol=ind.volumeSpike, box=ind.boxRange;
-  var rs=ind.relStrength, liq=ind.liquidityAbsorption, fake=ind.fakeBreakout;
-  var mfi=ind.mfi || 50;
+function calcCompositeScore(ind,btcFilter,prePump){
+  var rsi=ind.rsi,obv=ind.obv,macd=ind.macd;
+  var vol=ind.volumeSpike,box=ind.boxRange;
+  var rs=ind.relStrength,liq=ind.liquidityAbsorption,fake=ind.fakeBreakout;
+  var mfi=ind.mfi||50;
 
-  // ── ① 구조 점수 ──────────────────────────────────────────────
-  var structScore=0, structBD={};
+  // ① 구조 점수
+  var structScore=0,structBD={};
 
-  // 거래량 (3캔들 평균 기준 — calcVolumeSpike에서 이미 계산)
   var vs=0;
-  if(vol.ratio>=2.5){vs=2;} else if(vol.ratio>=1.5){vs=1.5;} else if(vol.ratio>=1.2) vs=1;
+  if(vol.ratio>=2.5){vs=2;}else if(vol.ratio>=1.5){vs=1.5;}else if(vol.ratio>=1.2) vs=1;
   if(vol.trend==='increasing'&&vs>0) vs=Math.min(vs+0.5,2);
-  structBD['거래량급증']=vs; structScore+=vs;
+  structBD['거래량급증']=vs;structScore+=vs;
 
-  // OBV + 다이버전스
   var os=0;
-  if(obv.trend==='up'&&obv.leading){os=1.5;} else if(obv.trend==='up'){os=1;} else if(obv.trend==='down') os=-0.5;
-  if(obv.divergence){os-=1.5;} // 하락 다이버전스 강감점
-  structBD['OBV']=os; structScore+=os;
+  if(obv.trend==='up'&&obv.leading){os=1.5;}else if(obv.trend==='up'){os=1;}else if(obv.trend==='down') os=-0.5;
+  if(obv.divergence){os-=1.5;}
+  structBD['OBV']=os;structScore+=os;
 
-  // MFI 교차 검증
   var ms=0;
-  if(mfi>=55&&mfi<=75){ms=1;} else if(mfi>75){ms=-0.5;} else if(mfi<40){ms=-0.5;}
-  structBD['MFI']=ms; structScore+=ms;
+  if(mfi>=55&&mfi<=75){ms=1;}else if(mfi>75){ms=-0.5;}else if(mfi<40){ms=-0.5;}
+  structBD['MFI']=ms;structScore+=ms;
 
-  // MACD
   var macs=0;
-  if(macd.crossType==='golden'){macs=1.5;} else if(macd.crossType==='golden_hold'&&macd.histTrend==='improving'){macs=1.5;}
-  else if(macd.crossType==='golden_hold') macs=1; else if(macd.histTrend==='improving') macs=0.5;
+  if(macd.crossType==='golden'){macs=1.5;}else if(macd.crossType==='golden_hold'&&macd.histTrend==='improving'){macs=1.5;}
+  else if(macd.crossType==='golden_hold') macs=1;else if(macd.histTrend==='improving') macs=0.5;
   else if(macd.crossType==='dead') macs=-1;
-  structBD['MACD']=macs; structScore+=macs;
+  structBD['MACD']=macs;structScore+=macs;
 
-  // 상대강도
   var rss=0;
-  if(rs.isStronger&&rs.diff>10){rss=1.5;} else if(rs.isStronger) rss=1; else if(rs.diff<-10) rss=-1;
-  structBD['상대강도']=rss; structScore+=rss;
+  if(rs.isStronger&&rs.diff>10){rss=1.5;}else if(rs.isStronger) rss=1;else if(rs.diff<-10) rss=-1;
+  structBD['상대강도']=rss;structScore+=rss;
 
-  // BTC 거시 페널티
-  structBD['BTC필터']=-btcFilter.penalty; structScore-=btcFilter.penalty;
+  structBD['BTC필터']=-btcFilter.penalty;structScore-=btcFilter.penalty;
 
-  // ── ② 진입(타이밍) 점수 ──────────────────────────────────────
-  var entryScore=0, entryBD={};
+  // ② 진입(타이밍) 점수
+  var entryScore=0,entryBD={};
 
-  // 박스권 위치 점수
+  // 박스권 위치 점수 (breakoutStrength 기반)
   var bs=0;
-  if(box.isNearTop&&box.isSideways)    { bs=2.5; }  // 박스 상단 근접(distanceToTop<3%) + 횡보 = 최우선
-  else if(box.isNearTop)               { bs=2; }
+  if(box.isNearTop&&box.isSideways){bs=2.5;}  // 상단 근접 + 횡보 = 최우선
+  else if(box.isNearTop){bs=2;}
   else if(box.isSideways&&box.distanceToBot<30) bs=0.5;
 
-  // [핵심 수정] 박스 돌파 기준 과열/막차 감점
-  // 단순 상승률(change24h) 기반 감점 완전 제거
-  // 반드시 box.isBreakout && breakoutStrength 기준으로만 감점
-  if (box.isBreakout) {
-    if (box.breakoutStrength <= 5) {
-      bs = 2;  // 초기 돌파 (5% 이내) = 가장 좋은 자리
-    } else if (box.breakoutStrength <= 8) {
-      bs = 1;  // 돌파 중간 = 주의
-    } else if (box.breakoutStrength <= 12) {
-      bs = 0;  // 돌파 과다 = 중립
-    } else {
-      bs = -1; // 12% 초과 = 추격 위험
-    }
+  // [핵심] breakoutStrength 기반 과열 판정 (단순 change24h 감점 완전 제거)
+  if(box.isBreakout){
+    if(box.breakoutStrength<=3)      bs=2.5;  // 초기 돌파 ✅ 최우선
+    else if(box.breakoutStrength<=5) bs=2;    // 초기 돌파
+    else if(box.breakoutStrength<=8) bs=1;    // 중간 돌파 주의
+    else if(box.breakoutStrength<=12) bs=0;   // 과열
+    else                              bs=-1.5; // 막차 위험
   }
-  entryBD['박스포지션']=bs; entryScore+=bs;
+  entryBD['박스포지션']=bs;entryScore+=bs;
 
-  // RSI 타이밍 (진입 최적 구간 55~68)
   var rs2=0;
-  if(rsi>=55&&rsi<=68){rs2=2;} else if(rsi>=50&&rsi<55){rs2=1.5;} else if(rsi>=45&&rsi<50){rs2=1;}
-  else if(rsi>68&&rsi<=75){rs2=0.5;} else if(rsi>75){rs2=-1;} else if(rsi<42){rs2=-0.5;}
-  entryBD['RSI타이밍']=rs2; entryScore+=rs2;
+  if(rsi>=55&&rsi<=68){rs2=2;}else if(rsi>=50&&rsi<55){rs2=1.5;}else if(rsi>=45&&rsi<50){rs2=1;}
+  else if(rsi>68&&rsi<=75){rs2=0.5;}else if(rsi>75){rs2=-1;}else if(rsi<42){rs2=-0.5;}
+  entryBD['RSI타이밍']=rs2;entryScore+=rs2;
 
-  // 유동성 흡수 (눌림목 진입 = 최우선 진입 시그널)
   var ls=0;
-  if(liq.detected){if(liq.strength==='strong'){ls=2;} else ls=1;}
-  entryBD['눌림목']=ls; entryScore+=ls;
+  if(liq.detected){if(liq.strength==='strong'){ls=2;}else ls=1;}
+  entryBD['눌림목']=ls;entryScore+=ls;
 
-  // 페이크 돌파 패널티
   var fs=0;
   if(fake.warned){fs=fake.level==='high'?-2:-1;}
-  entryBD['페이크경고']=fs; entryScore+=fs;
+  entryBD['페이크경고']=fs;entryScore+=fs;
 
-  // [핵심 수정] PRE-PUMP 점수 직접 반영 (+1.5)
+  // [핵심] PRE-PUMP 점수 직접 반영 (+1.5 entryScore)
   var prePumpBonus=0;
-  if(prePump && prePump.detected){
+  if(prePump&&prePump.detected){
     prePumpBonus=1.5;
     entryScore+=prePumpBonus;
     entryBD['PRE-PUMP가산']=prePumpBonus;
+    // 신뢰도 높으면 추가 가산
+    if(prePump.confidence>=1) entryBD['PRE-PUMP신뢰도']=0.5, entryScore+=0.5;
   }
 
-  // ── ③ 리스크 점수 ────────────────────────────────────────────
-  var riskScore=0, riskBD={};
-  if(rsi>75)           { riskScore+=2; riskBD['RSI과열']=2; }
-  if(fake.warned)      { var fp=fake.level==='high'?3:1.5; riskScore+=fp; riskBD['페이크']=fp; }
-  if(obv.divergence)   { riskScore+=2; riskBD['OBV다이버전스']=2; }
-  if(btcFilter.trend==='bear') { riskScore+=1.5; riskBD['BTC약세']=1.5; }
-  if(vol.ratio>3&&vol.trend!=='increasing') { riskScore+=1; riskBD['거래량단발']=1; }
+  // ③ 리스크 점수
+  var riskScore=0,riskBD={};
+  if(rsi>75){riskScore+=2;riskBD['RSI과열']=2;}
+  if(fake.warned){var fp=fake.level==='high'?3:1.5;riskScore+=fp;riskBD['페이크']=fp;}
+  if(obv.divergence){riskScore+=2;riskBD['OBV다이버전스']=2;}
+  if(btcFilter.trend==='bear'){riskScore+=1.5;riskBD['BTC약세']=1.5;}
+  if(vol.ratio>3&&vol.trend!=='increasing'){riskScore+=1;riskBD['거래량단발']=1;}
 
-  // [핵심 수정] 박스 돌파 후 막차 리스크 (breakoutStrength 기준)
-  if(box.isBreakout && box.breakoutStrength > 5)  { riskScore+=1; riskBD['돌파후상승과다']=1; }
-  if(box.isBreakout && box.breakoutStrength > 8)  { riskScore+=1; riskBD['단기과열']=1; }
-  if(box.isBreakout && box.breakoutStrength > 12) { riskScore+=1; riskBD['막차가능성']=1; }
+  // [핵심] breakoutStrength 기반 리스크 (단순 상승률 아님)
+  if(box.isBreakout&&box.breakoutStrength>5){riskScore+=1;riskBD['돌파후과열']=1;}
+  if(box.isBreakout&&box.breakoutStrength>8){riskScore+=1;riskBD['단기과열']=1;}
+  if(box.isBreakout&&box.breakoutStrength>12){riskScore+=1;riskBD['막차가능']=1;}
 
   var structFinal=parseFloat(Math.max(structScore,0).toFixed(2));
-  var entryFinal =parseFloat(Math.max(entryScore,0).toFixed(2));
-  var riskFinal  =parseFloat(Math.min(riskScore,10).toFixed(2));
+  var entryFinal=parseFloat(Math.max(entryScore,0).toFixed(2));
+  var riskFinal=parseFloat(Math.min(riskScore,10).toFixed(2));
 
-  // 종합 점수: 구조×0.4 + 진입×0.4 - 리스크×0.2
   var total=parseFloat(Math.max(structFinal*0.4+entryFinal*0.4-riskFinal*0.2,0).toFixed(2));
 
-  // [핵심 수정] PRE-PUMP totalScore에도 직접 가산
-  if(prePump && prePump.detected) {
-    total=parseFloat(Math.min(total+1.5, 15).toFixed(2)); // totalScore += 1.5 (상한 15)
+  // [핵심] PRE-PUMP totalScore 직접 가산 (+1.5)
+  if(prePump&&prePump.detected){
+    total=parseFloat(Math.min(total+1.5,15).toFixed(2));
   }
 
   var grade=total>=6?'S':total>=4.5?'A':total>=3?'B':'C';
 
-  // [핵심 수정] isEntryReady — PRE-PUMP 예외 포함
-  // isHighRisk: riskFinal>=4 === risk.level==='높음'
+  // [핵심] isEntryReady — PRE-PUMP 예외 포함
   var isHighRisk=riskFinal>=4;
   var isEntryReady=
-    (entryFinal>=2.5 && !isHighRisk) ||
-    (prePump && prePump.detected && !isHighRisk);  // PRE-PUMP는 점수 부족해도 포함
+    (entryFinal>=2.5&&!isHighRisk)||
+    (prePump&&prePump.detected&&!isHighRisk); // PRE-PUMP는 점수 부족해도 포함
 
-  // 경고 (Set으로 중복 제거)
+  // 경고 (중복 제거)
   var warnSet=new Set();
-  if(rsi>75)             warnSet.add('RSI 과열권');
-  if(fake.warned)        warnSet.add(fake.desc);
-  if(obv.divergence)     warnSet.add('OBV 하락 다이버전스');
+  if(rsi>75) warnSet.add('RSI 과열권');
+  if(fake.warned) warnSet.add(fake.desc);
+  if(obv.divergence) warnSet.add('OBV 하락 다이버전스');
   if(btcFilter.trend==='bear') warnSet.add('BTC 하락 추세');
-  if(box.isBreakout&&box.breakoutStrength>5)  warnSet.add('돌파 후 상승 과다 (추격 주의)');
-  if(box.isBreakout&&box.breakoutStrength>8)  warnSet.add('단기 과열 구간');
+  if(box.isBreakout&&box.breakoutStrength>5) warnSet.add('돌파 후 상승 과다 (추격 주의)');
+  if(box.isBreakout&&box.breakoutStrength>8) warnSet.add('단기 과열 구간');
   if(box.isBreakout&&box.breakoutStrength>12) warnSet.add('막차 구간 가능성 높음');
 
   // 액션
   var action='관찰만';
   if(total>=6&&riskFinal<=2) action='진입 우선';
-  else if(total>=5)          action='분할 진입';
+  else if(total>=5) action='분할 진입';
   else if(liq.detected&&total>=3) action='눌림 대기';
   if(prePump&&prePump.detected&&!isHighRisk&&action==='관찰만') action='PRE-PUMP 대기';
   if(fake.warned&&fake.level==='high') action='추격 금지';
@@ -1667,127 +1641,125 @@ function calcCompositeScore(ind, btcFilter, prePump) {
 
   // 신호 태그
   var signals=[];
-  if(prePump&&prePump.detected) signals.push('🟣PRE-PUMP'); // 최상단
+  if(prePump&&prePump.detected) signals.push('🟣PRE-PUMP');
   if(vol.ratio>=1.5) signals.push('거래량'+(vol.ratio>=2.5?'급증':'증가'));
-  if(obv.leading) signals.push('OBV선행'); else if(obv.trend==='up') signals.push('OBV상승');
-  if(macd.crossType==='golden') signals.push('MACD골든'); else if(macd.crossType==='golden_hold') signals.push('MACD유지');
-  if(box.isBreakout&&box.breakoutStrength<=5) signals.push('박스돌파↑');
+  if(obv.leading) signals.push('OBV선행');else if(obv.trend==='up') signals.push('OBV상승');
+  if(macd.crossType==='golden') signals.push('MACD골든');else if(macd.crossType==='golden_hold') signals.push('MACD유지');
+  if(box.isBreakout&&box.breakoutStrength<=5) signals.push('초기돌파✅');
   else if(box.isNearTop&&box.isSideways) signals.push('돌파직전');
   if(liq.detected) signals.push('유동성흡수');
   if(rs.isStronger) signals.push('상대강도↑');
   if(fake.warned) signals.push('⚠페이크주의');
 
-  // 매집 코멘트
+  // 코멘트
   var accArr=[];
-  if(prePump&&prePump.detected) accArr.push('🟣 PRE-PUMP: OBV 선행 + 거래량 미폭발 + 횡보 + RSI 중립 → 초기 매집 가능성');
+  if(prePump&&prePump.detected){
+    var ppDesc='🟣 PRE-PUMP: 박스 횡보+상단근접+OBV선행+거래량점진증가 ('+prePump.count+'/7 조건)';
+    if(prePump.confidence>0) ppDesc+=' — 신뢰도 '+prePump.confidence.toFixed(1);
+    accArr.push(ppDesc);
+  }
   if(obv.leading) accArr.push('OBV 선행 상승 → 박스권 내 조용한 자금 유입 가능성');
   if(liq.detected) accArr.push(liq.desc);
   if(box.isNearTop&&vol.isSpike) accArr.push('거래량 동반 상단 접근, 돌파 준비 가능성');
   if(obv.divergence) accArr.push('⚠ OBV 하락 다이버전스: 가격 상승 중 자금 이탈 가능성');
-  if(btcFilter.trend==='bear') accArr.push('⚠ BTC 약세 구간: 알트 동반 하락 위험');
+  if(btcFilter.trend==='bear') accArr.push('⚠ BTC 약세: 알트 동반 하락 위험');
   accArr.push('※ 모든 신호는 가능성이며 확정이 아닙니다.');
-  var accComment=accArr.join('\n');
 
   var structureDesc='';
   if(box.isBreakout){
-    structureDesc='박스 상단('+formatPrice(box.high)+') 돌파, 강도 '+box.breakoutStrength+'%';
-    if(box.breakoutStrength>12) structureDesc+=' ⚠막차 주의';
-    else if(box.breakoutStrength>8) structureDesc+=' ⚠과열';
-    else if(box.breakoutStrength>5) structureDesc+=' (추격 주의)';
-    else structureDesc+=' ✅초기 돌파';
-  } else if(box.isNearTop) {
-    structureDesc='박스 상단('+formatPrice(box.high)+') 근접, '+box.distanceToTop+'% 남음';
-  } else if(box.isSideways) {
-    structureDesc='횡보 박스 ('+box.rangePercent+'%), 하단 대비 '+box.distanceToBot.toFixed(1)+'% 위치';
-  } else {
+    structureDesc='박스 상단('+formatPrice(box.high)+') 돌파 강도 '+box.breakoutStrength+'%';
+    if(box.breakoutStrength<=3) structureDesc+=' ✅ 초기 돌파 (최우선)';
+    else if(box.breakoutStrength<=5) structureDesc+=' ✅ 초기 돌파';
+    else if(box.breakoutStrength<=8) structureDesc+=' ⚠ 추격 주의';
+    else if(box.breakoutStrength<=12) structureDesc+=' ⚠ 과열';
+    else structureDesc+=' 🚫 막차 가능성';
+  }else if(box.isNearTop){
+    structureDesc='박스 상단('+formatPrice(box.high)+') 근접 — '+box.distanceToTop+'% 남음';
+  }else if(box.isSideways){
+    structureDesc='횡보 박스 ('+box.rangePercent+'%) — 하단 대비 '+box.distanceToBot.toFixed(1)+'% 위치';
+  }else{
     structureDesc='박스권 미형성, 추세 모니터링';
   }
 
-  return {
-    total:total, structScore:structFinal, entryScore:entryFinal, riskScore:riskFinal,
-    structBD:structBD, entryBD:entryBD, riskBD:riskBD,
-    grade:grade, signals:signals, warnings:Array.from(warnSet),
-    action:action, accComment:accComment, structureDesc:structureDesc,
-    isEntryReady:isEntryReady,
-    prePumpDetected:!!(prePump&&prePump.detected)
+  return{
+    total,structScore:structFinal,entryScore:entryFinal,riskScore:riskFinal,
+    structBD,entryBD,riskBD,grade,signals,warnings:Array.from(warnSet),
+    action,accComment:accArr.join('\n'),structureDesc,
+    isEntryReady,prePumpDetected:!!(prePump&&prePump.detected)
   };
 }
 
-// ── 포맷 유틸 ─────────────────────────────────────────────────────
-function formatPrice(price) {
-  if (!price||isNaN(price)) return '-';
-  if (price>=1000000) return price.toLocaleString('ko-KR',{maximumFractionDigits:0});
-  if (price>=100) return price.toLocaleString('ko-KR',{maximumFractionDigits:2});
-  if (price>=1) return price.toFixed(4);
+function formatPrice(price){
+  if(!price||isNaN(price)) return'-';
+  if(price>=1000000) return price.toLocaleString('ko-KR',{maximumFractionDigits:0});
+  if(price>=100) return price.toLocaleString('ko-KR',{maximumFractionDigits:2});
+  if(price>=1) return price.toFixed(4);
   return price.toFixed(8);
 }
-function formatPct(val) {
-  if (val===undefined||val===null||isNaN(val)) return '-';
-  var v=parseFloat(val); return (v>=0?'+':'')+v.toFixed(2)+'%';
+function formatPct(val){
+  if(val===undefined||val===null||isNaN(val)) return'-';
+  var v=parseFloat(val);return(v>=0?'+':'')+v.toFixed(2)+'%';
 }
 
 // ══════════════════════════════════════════════════════════════════
 // 상태 & UI
 // ══════════════════════════════════════════════════════════════════
 var state={
-  exchanges:{ upbit:true, binance:true },
-  results:[], displayResults:[],
-  filteredGrade:'ALL', quickFilter:'all',
-  isScanning:false, btcFilter:null, lastScanTime:null,
+  exchanges:{upbit:true,binance:true},
+  results:[],displayResults:[],
+  filteredGrade:'ALL',quickFilter:'all',
+  isScanning:false,btcFilter:null,lastScanTime:null,
 };
 
-var CACHE_KEY='cryptoScannerResults_v5';
+var CACHE_KEY='cryptoScannerResults_v6';
 var CACHE_TTL=5*60*1000;
 
-function saveCache(results) {
-  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ ts:Date.now(), data:results })); } catch(e) {}
-}
-function loadCache() {
-  try {
-    var raw=localStorage.getItem(CACHE_KEY);
-    if (!raw) return null;
+function saveCache(results){try{localStorage.setItem(CACHE_KEY,JSON.stringify({ts:Date.now(),data:results}));}catch(e){}}
+function loadCache(){
+  try{
+    var raw=localStorage.getItem(CACHE_KEY);if(!raw) return null;
     var parsed=JSON.parse(raw);
-    if (Date.now()-parsed.ts > CACHE_TTL) return null;
-    return { data:parsed.data, age:Math.round((Date.now()-parsed.ts)/1000) };
-  } catch(e) { return null; }
+    if(Date.now()-parsed.ts>CACHE_TTL) return null;
+    return{data:parsed.data,age:Math.round((Date.now()-parsed.ts)/1000)};
+  }catch(e){return null;}
 }
-function clearCacheAndScan() {
-  try { localStorage.removeItem(CACHE_KEY); } catch(e) {}
+function clearCacheAndScan(){
+  try{localStorage.removeItem(CACHE_KEY);}catch(e){}
   document.getElementById('cacheNotice').classList.remove('visible');
   startScan();
 }
 
-function addLog(msg, type) {
+function addLog(msg,type){
   type=type||'info';
-  var box=document.getElementById('logBox'); if(!box) return;
-  var line=document.createElement('div'); line.className='log-'+type;
+  var box=document.getElementById('logBox');if(!box) return;
+  var line=document.createElement('div');line.className='log-'+type;
   var t=new Date().toLocaleTimeString('ko-KR',{hour12:false});
   line.textContent='['+t+'] '+msg;
-  box.appendChild(line); box.scrollTop=box.scrollHeight;
+  box.appendChild(line);box.scrollTop=box.scrollHeight;
 }
 
-function updateProgress(pct, symbol) {
+function updateProgress(pct,symbol){
   document.getElementById('progressBar').style.width=pct+'%';
   document.getElementById('progressPct').textContent=Math.round(pct)+'%';
   if(symbol) document.getElementById('currentSymbol').textContent='분석 중: '+symbol;
 }
 
-function toggleExchange(ex) {
+function toggleExchange(ex){
   state.exchanges[ex]=!state.exchanges[ex];
   var id='toggle'+ex.charAt(0).toUpperCase()+ex.slice(1);
-  var btn=document.getElementById(id); if(!btn) return;
+  var btn=document.getElementById(id);if(!btn) return;
   if(state.exchanges[ex]) btn.classList.add('active-'+ex);
   else btn.classList.remove('active-'+ex);
 }
 
 // ── 메인 스캔 ─────────────────────────────────────────────────────
-async function startScan() {
-  if (state.isScanning) return;
+async function startScan(){
+  if(state.isScanning) return;
   state.isScanning=true;
   btcCandleCache=null;
 
   var btn=document.getElementById('scanBtn');
-  btn.disabled=true; btn.classList.add('scanning'); btn.textContent='⟳ SCANNING...';
+  btn.disabled=true;btn.classList.add('scanning');btn.textContent='⟳ SCANNING...';
   document.getElementById('progressPanel').classList.add('visible');
   document.getElementById('summaryBar').classList.remove('visible');
   document.getElementById('filterBar').classList.remove('visible');
@@ -1798,106 +1770,117 @@ async function startScan() {
   document.getElementById('liveDot').className='live-dot active';
   document.getElementById('liveStatus').textContent='SCANNING';
 
-  var symbolCount=Math.min(50,Math.max(5,parseInt(document.getElementById('inputSymbolCount').value)||20));
-  var minScore   =parseFloat(document.getElementById('inputMinScore').value)||3;
-  var candleCount=Math.min(200,Math.max(50,parseInt(document.getElementById('inputCandleCount').value)||150));
+  var symbolCount=Math.min(50,Math.max(5,parseInt(document.getElementById('inputSymbolCount').value)||30));
+  var minScore=parseFloat(document.getElementById('inputMinScore').value)||3;
+  var candleCount=Math.min(200,Math.max(50,parseInt(document.getElementById('inputCandleCount').value)||120));
 
-  state.results=[]; updateProgress(0,'');
-  addLog('스캔 시작 — 심볼 '+symbolCount+'개 | 캔들 '+candleCount+'개', 'info');
+  state.results=[];updateProgress(0,'');
+  addLog('스캔 시작 — 상위 '+symbolCount+'개 | 캔들 '+candleCount+'개','info');
 
-  // Worker 연결 확인
+  // Worker 확인
   var proxy=getProxyUrl();
-  if (state.exchanges.binance) {
-    if (!proxy) { addLog('[WORKER] URL 미입력 → 바이낸스 스킵', 'warn'); }
-    else { addLog('[WORKER] 연결 테스트 중...', 'info'); await testBinanceProxy(); }
+  if(state.exchanges.binance){
+    if(!proxy){addLog('[WORKER] URL 미입력 → 바이낸스 스킵','warn');}
+    else{addLog('[WORKER] 연결 테스트...','info');await testBinanceProxy();}
   }
 
   // BTC 거시 필터
-  addLog('[BTC] 거시 필터 분석 중...', 'info');
+  addLog('[BTC] 거시 필터 분석...','info');
   var btcCandles=await loadBTCCandles(candleCount);
   var btcCloses=btcCandles.map(function(c){return c.close;});
   state.btcFilter=calcBTCFilter(btcCandles);
-  addLog('[BTC] 추세: '+state.btcFilter.trend+(state.btcFilter.penalty>0?' | 페널티: -'+state.btcFilter.penalty:''), state.btcFilter.trend==='bear'?'warn':'ok');
+  addLog('[BTC] 추세: '+state.btcFilter.trend+(state.btcFilter.penalty>0?' | 패널티: -'+state.btcFilter.penalty:''),state.btcFilter.trend==='bear'?'warn':'ok');
 
   var btcWarnEl=document.getElementById('btcWarnBanner');
-  if (btcWarnEl) {
-    if (state.btcFilter.trend==='bear') { btcWarnEl.style.display='block'; btcWarnEl.textContent='⚠ BTC 하락 추세: '+state.btcFilter.desc; }
+  if(btcWarnEl){
+    if(state.btcFilter.trend==='bear'){btcWarnEl.style.display='block';btcWarnEl.textContent='⚠ BTC 하락 추세: '+state.btcFilter.desc;}
     else btcWarnEl.style.display='none';
   }
 
-  // 전체 Ticker 먼저 수집 (buildDynamicTopBases에 사용)
-  var allMarkets=Object.keys(SYMBOL_MAP);
-  addLog('[UPBIT] 전체 Ticker 수집 중...', 'info');
+  // [핵심] 업비트 전체 KRW 마켓 조회
+  addLog('[UPBIT] 전체 KRW 마켓 목록 조회 중...','info');
+  var allMarketList=await fetchUpbitAllMarkets();
+  var allMarketCodes=allMarketList.map(function(m){return m.market;});
+
+  if(allMarketCodes.length===0){
+    // fallback: SYMBOL_MAP 사용
+    addLog('[FALLBACK] 전체 마켓 조회 실패 → SYMBOL_MAP 사용','warn');
+    allMarketCodes=Object.keys(SYMBOL_MAP)
+      .filter(function(b){return SYMBOL_MAP[b];})
+      .map(function(b){return'KRW-'+b;});
+  }
+
+  // 업비트 전체 Ticker 수집 (100개씩 분할)
+  addLog('[UPBIT] 전체 Ticker 수집 중 ('+allMarketCodes.length+'개)...','info');
   var upbitTickerMap={};
-  if (state.exchanges.upbit) {
-    var upbitMarkets=allMarkets.map(function(b){return SYMBOL_MAP[b].upbit;}).filter(Boolean);
-    var tickers=await fetchUpbitTicker(upbitMarkets);
-    tickers.forEach(function(t){upbitTickerMap[t.market]=t;});
-    addLog('[UPBIT] Ticker '+tickers.length+'개 완료', 'ok');
-  }
+  var allTickers=await fetchUpbitTicker(allMarketCodes);
+  allTickers.forEach(function(t){upbitTickerMap[t.market]=t;});
+  addLog('[UPBIT] Ticker '+allTickers.length+'개 수집 완료','ok');
 
+  // 바이낸스 Ticker (있으면)
   var binanceTickerMap={};
-  if (state.exchanges.binance && getProxyUrl()) {
-    var bSyms=allMarkets.map(function(b){return SYMBOL_MAP[b].binance;}).filter(Boolean);
+  if(state.exchanges.binance&&getProxyUrl()){
+    var bSyms=Object.values(SYMBOL_MAP).filter(Boolean);
     binanceTickerMap=await fetchBinanceTickers(bSyms);
-    addLog('[BINANCE] Ticker '+Object.keys(binanceTickerMap).length+'개 완료', 'ok');
+    addLog('[BINANCE] Ticker '+Object.keys(binanceTickerMap).length+'개 완료','ok');
   }
 
-  // [핵심 수정] 동적 심볼 선정 — 오늘 움직이는 코인 자동 선별
-  var allBases=buildDynamicTopBases(symbolCount, upbitTickerMap, binanceTickerMap);
-  addLog('동적 선정 ('+allBases.length+'개): '+allBases.join(', '), 'info');
+  // [핵심] 동적 심볼 선정 — 업비트 전체 마켓 기반
+  var allBases=buildDynamicTopBases(symbolCount,upbitTickerMap,binanceTickerMap);
 
   // 심볼별 분석
-  for (var i=0;i<allBases.length;i++) {
+  for(var i=0;i<allBases.length;i++){
     var base=allBases[i];
-    updateProgress((i/allBases.length)*90, base);
-    addLog('['+(i+1)+'/'+allBases.length+'] '+base+' 분석 중...', 'info');
+    updateProgress((i/allBases.length)*90,base);
+    addLog('['+(i+1)+'/'+allBases.length+'] '+base+' 분석 중...','info');
     var analysis=await analyzeSymbol(base,candleCount,btcCloses,upbitTickerMap,binanceTickerMap,state.btcFilter);
-    if (analysis && analysis.score.total>=minScore) {
+    if(analysis&&analysis.score.total>=minScore){
       state.results.push(analysis);
-      addLog('['+base+'] 구조:'+analysis.score.structScore+' 진입:'+analysis.score.entryScore+' 리스크:'+analysis.score.riskScore+(analysis.prePump&&analysis.prePump.detected?' 🟣PRE-PUMP':'')+'('+analysis.score.grade+')', 'ok');
+      var pp=analysis.prePump&&analysis.prePump.detected?' 🟣PRE-PUMP':'';
+      addLog('['+base+'] 구조:'+analysis.score.structScore+' 진입:'+analysis.score.entryScore+' 리스크:'+analysis.score.riskScore+pp+'('+analysis.score.grade+')','ok');
     }
-    await sleep(300); // 350→300ms (약간 단축)
+    await sleep(250);
   }
 
   updateProgress(100,'완료');
-  addLog('스캔 완료. 총 '+state.results.length+'개 후보', 'ok');
+  addLog('스캔 완료. 총 '+state.results.length+'개 후보','ok');
   state.lastScanTime=Date.now();
   saveCache(state.results);
 
-  applyFilter();
-  renderSummary();
+  applyFilter();renderSummary();
   document.getElementById('summaryBar').classList.add('visible');
   document.getElementById('filterBar').classList.add('visible');
   document.getElementById('quickFilterBar').classList.add('visible');
   document.getElementById('progressPanel').classList.remove('visible');
   document.getElementById('liveDot').className='live-dot active';
   document.getElementById('liveStatus').textContent='DONE ('+state.results.length+')';
-  btn.disabled=false; btn.classList.remove('scanning'); btn.textContent='▶ SCAN START';
+  btn.disabled=false;btn.classList.remove('scanning');btn.textContent='▶ SCAN START';
   state.isScanning=false;
 }
 
 var sleep=function(ms){return new Promise(function(r){setTimeout(r,ms);});};
 
 // ── analyzeSymbol ─────────────────────────────────────────────────
-async function analyzeSymbol(base, candleCount, btcCloses, upbitTickerMap, binanceTickerMap, btcFilter) {
-  var upbitMarket=SYMBOL_MAP[base].upbit, binanceSymbol=SYMBOL_MAP[base].binance;
-  var upbitCandles=[], binanceCandles=null, ticker24h=null;
+async function analyzeSymbol(base,candleCount,btcCloses,upbitTickerMap,binanceTickerMap,btcFilter){
+  var upbitMarket='KRW-'+base;
+  var binanceSymbol=SYMBOL_MAP[base]||null;
+  var upbitCandles=[],binanceCandles=null,ticker24h=null;
 
-  if (state.exchanges.upbit && upbitMarket) {
-    var raw=await fetchUpbitCandles(upbitMarket, candleCount);
+  if(state.exchanges.upbit){
+    var raw=await fetchUpbitCandles(upbitMarket,candleCount);
     upbitCandles=normalizeCandles(raw);
-    if (upbitTickerMap[upbitMarket]) {
+    if(upbitTickerMap[upbitMarket]){
       var t=upbitTickerMap[upbitMarket];
-      ticker24h={exchange:'upbit',currentPrice:t.trade_price,change24h:t.signed_change_rate*100,
-                 volume24h:t.acc_trade_volume_24h,tradeValue24h:t.acc_trade_price_24h};
+      ticker24h={exchange:'upbit',currentPrice:t.trade_price,
+                 change24h:t.signed_change_rate*100,volume24h:t.acc_trade_volume_24h,
+                 tradeValue24h:t.acc_trade_price_24h};
     }
   }
 
-  if (state.exchanges.binance && binanceSymbol && getProxyUrl()) {
-    var rawB=await fetchBinanceCandles(binanceSymbol, candleCount);
-    if (rawB) binanceCandles=normalizeCandles(rawB);
-    if (!ticker24h && binanceTickerMap[binanceSymbol]) {
+  if(state.exchanges.binance&&binanceSymbol&&getProxyUrl()){
+    var rawB=await fetchBinanceCandles(binanceSymbol,candleCount);
+    if(rawB) binanceCandles=normalizeCandles(rawB);
+    if(!ticker24h&&binanceTickerMap[binanceSymbol]){
       var bt=binanceTickerMap[binanceSymbol];
       ticker24h={exchange:'binance',currentPrice:bt.currentPrice,change24h:bt.change24h,
                  volume24h:bt.volume24h,tradeValue24h:bt.quoteVolume};
@@ -1907,126 +1890,118 @@ async function analyzeSymbol(base, candleCount, btcCloses, upbitTickerMap, binan
   var mainCandles=upbitCandles.length>=20?upbitCandles:(binanceCandles&&binanceCandles.length>=20?binanceCandles:[]);
   var mainExchange=upbitCandles.length>=20?'upbit':'binance';
 
-  if (mainCandles.length<20) {
-    addLog('['+base+'] 캔들 부족 (업비트:'+upbitCandles.length+' 바이낸스:'+(binanceCandles?binanceCandles.length:0)+'), 건너뜀','warn');
+  if(mainCandles.length<20){
+    addLog('['+base+'] 캔들 부족(업비트:'+upbitCandles.length+' 바이낸스:'+(binanceCandles?binanceCandles.length:0)+'), 건너뜀','warn');
     return null;
   }
 
   var closes=mainCandles.map(function(c){return c.close;});
   var volumes=mainCandles.map(function(c){return c.volume;});
 
-  var rsi      =calcRSI(closes);
-  var obv      =calcOBV(mainCandles);
-  var mfi      =calcMFI(mainCandles,14);
-  var macd     =calcMACD(closes);
-  var volSpike =calcVolumeSpike(volumes);  // 3캔들 평균 기준
-  var boxRange =calcBoxRange(mainCandles);
-  var relStr   =calcRelativeStrength(closes, btcCloses, 50);
-  var liqAbs   =detectLiquidityAbsorption(mainCandles);
-  var fakeBr   =detectFakeBreakout(mainCandles);
-  var targets  =calcEntryTargets(mainCandles, boxRange);
-  var risk     =calcRiskLevel(targets, rsi, fakeBr, volSpike);
+  var rsi=calcRSI(closes);
+  var obv=calcOBV(mainCandles);
+  var mfi=calcMFI(mainCandles,14);
+  var macd=calcMACD(closes);
+  var volSpike=calcVolumeSpike(volumes);
+  var boxRange=calcBoxRange(mainCandles);
+  var relStr=calcRelativeStrength(closes,btcCloses,50);
+  var liqAbs=detectLiquidityAbsorption(mainCandles);
+  var fakeBr=detectFakeBreakout(mainCandles);
+  var targets=calcEntryTargets(mainCandles,boxRange);
+  var risk=calcRiskLevel(targets,rsi,fakeBr,volSpike);
 
-  var indicators={rsi,obv,mfi,macd,volumeSpike:volSpike,boxRange,relStrength:relStr,liquidityAbsorption:liqAbs,fakeBreakout:fakeBr};
-  var prePump  =detectPrePump(indicators);
-  var score    =calcCompositeScore(indicators, btcFilter||{trend:'bull',penalty:0,desc:''}, prePump);
-  var exStates =buildExchangeStates(base, upbitCandles, binanceCandles);
+  var indicators={rsi,obv,mfi,macd,volumeSpike:volSpike,boxRange,
+                  relStrength:relStr,liquidityAbsorption:liqAbs,fakeBreakout:fakeBr};
+  var prePump=detectPrePump(indicators);
+  var score=calcCompositeScore(indicators,btcFilter||{trend:'bull',penalty:0,desc:''},prePump);
+  var exStates=buildExchangeStates(base,upbitCandles,binanceCandles);
 
-  return {
-    base, mainExchange,
+  return{
+    base,mainExchange,
     currentPrice:ticker24h?ticker24h.currentPrice:mainCandles[mainCandles.length-1].close,
-    change24h:   ticker24h?ticker24h.change24h:0,
-    ticker24h, indicators, targets, risk, score, prePump, exStates,
+    change24h:ticker24h?ticker24h.change24h:0,
+    ticker24h,indicators,targets,risk,score,prePump,exStates,
     candleCount:mainCandles.length,
     lastUpdated:new Date().toLocaleTimeString('ko-KR',{hour12:false})
   };
 }
 
-function buildExchangeStates(base, upbitCandles, binanceCandles) {
-  function buildState(candles, exName) {
-    if (!candles||candles.length<5) return {exchange:exName,available:false};
+function buildExchangeStates(base,upbitCandles,binanceCandles){
+  function buildState(candles,exName){
+    if(!candles||candles.length<5) return{exchange:exName,available:false};
     var closes=candles.map(function(c){return c.close;});
-    var rsi=calcRSI(closes,14), obv=calcOBV(candles), box=calcBoxRange(candles);
+    var rsi=calcRSI(closes,14),obv=calcOBV(candles),box=calcBoxRange(candles);
     var str=Math.round((box.distanceToBot/(box.rangePercent||10))*50+(rsi/100)*50);
     var status='횡보';
-    if(box.isBreakout) status='돌파'; else if(box.isNearTop) status='상단테스트'; else if(rsi>60) status='강세'; else if(rsi<40) status='약세';
-    return {exchange:exName,available:true,rsi,obv:obv.trend,box,strength:str,status};
+    if(box.isBreakout) status='돌파';else if(box.isNearTop) status='상단테스트';
+    else if(rsi>60) status='강세';else if(rsi<40) status='약세';
+    return{exchange:exName,available:true,rsi,obv:obv.trend,box,strength:str,status};
   }
-  return [buildState(upbitCandles,'upbit'), buildState(binanceCandles,'binance')];
+  return[buildState(upbitCandles,'upbit'),buildState(binanceCandles,'binance')];
 }
 
 // ══════════════════════════════════════════════════════════════════
-// [핵심 수정] 4. applyFilter — PRE-PUMP 우선 정렬 (aPre/bPre 방식)
+// [수정] F. applyFilter — PRE-PUMP 정렬 우선권 (aPre/bPre)
 // ══════════════════════════════════════════════════════════════════
-function setFilter(grade, btn) {
+function setFilter(grade,btn){
   state.filteredGrade=grade;
   document.querySelectorAll('.grade-filter').forEach(function(b){b.classList.remove('f-active');});
-  btn.classList.add('f-active');
-  applyFilter();
+  btn.classList.add('f-active');applyFilter();
 }
-
-function setQuickFilter(type, btn) {
+function setQuickFilter(type,btn){
   state.quickFilter=type;
   document.querySelectorAll('.qf-btn').forEach(function(b){b.className='qf-btn';});
-  btn.classList.add('active-'+type);
-  applyFilter();
+  btn.classList.add('active-'+type);applyFilter();
 }
 
-function applyFilter() {
+function applyFilter(){
   var sortBy=document.getElementById('sortSelect')?document.getElementById('sortSelect').value:'score';
   var filtered=state.results.slice();
 
   // 등급 필터
-  if (state.filteredGrade!=='ALL') {
+  if(state.filteredGrade!=='ALL')
     filtered=filtered.filter(function(r){return r.score.grade===state.filteredGrade;});
-  }
 
   // 퀵 필터
-  if (state.quickFilter==='entry') {
-    // [핵심 수정] Entry Ready 조건 완화 + PRE-PUMP 예외
+  if(state.quickFilter==='entry'){
+    // Entry Ready: 기본 조건 OR PRE-PUMP 예외
     filtered=filtered.filter(function(r){
       var isHighRisk=r.risk&&r.risk.level==='높음';
-      var entryOk  =r.score.entryScore>=2.5&&!isHighRisk;
+      var entryOk=r.score.entryScore>=2.5&&!isHighRisk;
       var prePumpOk=(r.prePump&&r.prePump.detected||r.score.prePumpDetected)&&!isHighRisk;
       return entryOk||prePumpOk;
     });
-  } else if (state.quickFilter==='prepump') {
-    filtered=filtered.filter(function(r){return (r.prePump&&r.prePump.detected)||r.score.prePumpDetected;});
+  }else if(state.quickFilter==='prepump'){
+    filtered=filtered.filter(function(r){return(r.prePump&&r.prePump.detected)||r.score.prePumpDetected;});
   }
 
-  // [핵심 수정] 정렬 — PRE-PUMP 무조건 상단 우선 (aPre/bPre)
-  filtered.sort(function(a, b) {
-    var aPre=(a.prePump&&a.prePump.detected)||a.score.prePumpDetected ? 1 : 0;
-    var bPre=(b.prePump&&b.prePump.detected)||b.score.prePumpDetected ? 1 : 0;
+  // [핵심] 정렬 — PRE-PUMP 무조건 최상단 (aPre/bPre 방식)
+  filtered.sort(function(a,b){
+    var aPre=(a.prePump&&a.prePump.detected)||a.score.prePumpDetected?1:0;
+    var bPre=(b.prePump&&b.prePump.detected)||b.score.prePumpDetected?1:0;
 
-    // PRE-PUMP 필터: 최상단 고정 → entryScore → total
-    if (state.quickFilter==='prepump'||sortBy==='prepump') {
-      if (bPre!==aPre) return bPre-aPre;
+    // [초기 매집] 필터: PRE-PUMP 최상단 고정 → confidence → entryScore → total
+    if(state.quickFilter==='prepump'||sortBy==='prepump'){
+      if(bPre!==aPre) return bPre-aPre;
+      var aCon=(a.prePump&&a.prePump.confidence)||0;
+      var bCon=(b.prePump&&b.prePump.confidence)||0;
+      if(bCon!==aCon) return bCon-aCon;
       return b.score.entryScore-a.score.entryScore||b.score.total-a.score.total;
     }
 
     // 진입점수순: PRE-PUMP 우선 → entryScore → total
-    if (sortBy==='entry') {
-      if (bPre!==aPre) return bPre-aPre;
-      if (b.score.entryScore!==a.score.entryScore) return b.score.entryScore-a.score.entryScore;
+    if(sortBy==='entry'){
+      if(bPre!==aPre) return bPre-aPre;
+      if(b.score.entryScore!==a.score.entryScore) return b.score.entryScore-a.score.entryScore;
       return b.score.total-a.score.total;
     }
-
-    // 변동률순: PRE-PUMP 우선 → change24h
-    if (sortBy==='change') {
-      if (bPre!==aPre) return bPre-aPre;
-      return b.change24h-a.change24h;
-    }
-
+    // 변동률순: PRE-PUMP 우선 → change
+    if(sortBy==='change'){if(bPre!==aPre) return bPre-aPre;return b.change24h-a.change24h;}
     // RSI순: PRE-PUMP 우선 → RSI
-    if (sortBy==='rsi') {
-      if (bPre!==aPre) return bPre-aPre;
-      return b.indicators.rsi-a.indicators.rsi;
-    }
-
+    if(sortBy==='rsi'){if(bPre!==aPre) return bPre-aPre;return b.indicators.rsi-a.indicators.rsi;}
     // 종합점수순 (기본): PRE-PUMP 우선 → total → entryScore
-    if (bPre!==aPre) return bPre-aPre;
-    if (b.score.total!==a.score.total) return b.score.total-a.score.total;
+    if(bPre!==aPre) return bPre-aPre;
+    if(b.score.total!==a.score.total) return b.score.total-a.score.total;
     return b.score.entryScore-a.score.entryScore;
   });
 
@@ -2034,33 +2009,32 @@ function applyFilter() {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// [핵심 수정] 5. renderSummary — 등급 기준 완전 동기화
-// S: total>=6.0 / A: 4.5~5.9 / HTML 문구와 100% 일치
+// [수정] G. renderSummary — 등급 기준 완전 동기화
+// S: grade==='S' (total>=6.0) / A: grade==='A' (4.5~5.9)
 // ══════════════════════════════════════════════════════════════════
-function renderSummary() {
+function renderSummary(){
   var r=state.results;
-  // grade는 calcCompositeScore에서 total>=6→S, >=4.5→A, >=3→B 로 계산됨
-  document.getElementById('sumTotal').textContent  =r.length;
-  document.getElementById('sumStrong').textContent =r.filter(function(x){return x.score.grade==='S';}).length;
-  document.getElementById('sumWatch').textContent  =r.filter(function(x){return x.score.grade==='A';}).length;
+  document.getElementById('sumTotal').textContent=r.length;
+  document.getElementById('sumStrong').textContent=r.filter(function(x){return x.score.grade==='S';}).length;
+  document.getElementById('sumWatch').textContent=r.filter(function(x){return x.score.grade==='A';}).length;
   var top=r.reduce(function(m,x){return x.score.total>m?x.score.total:m;},0);
   document.getElementById('sumTop').textContent=top;
 }
 
-// ── 결과 렌더링 ───────────────────────────────────────────────────
-function renderResultList(results) {
+// ── 카드 렌더링 ───────────────────────────────────────────────────
+function renderResultList(results){
   var list=document.getElementById('resultList');
   state.displayResults=results||[];
-  if (!results||!results.length) {
+  if(!results||!results.length){
     list.innerHTML='<div class="empty-state">조건에 맞는 후보 없음<br>필터 조정 또는 재스캔</div>';
     return;
   }
   list.innerHTML=results.map(function(r,i){return buildCardHTML(r,i);}).join('');
 }
 
-function buildCardHTML(r, idx) {
+function buildCardHTML(r,idx){
   var scoreColor=r.score.grade==='S'?'var(--accent-red)':r.score.grade==='A'?'var(--accent-orange)':r.score.grade==='B'?'var(--accent-yellow)':'var(--text-muted)';
-  var exTagsHTML=r.exStates.filter(function(e){return e.available;}).map(function(e){return '<span class="ex-tag ex-tag-'+e.exchange+'">'+e.exchange.toUpperCase()+'</span>';}).join('');
+  var exTagsHTML=r.exStates.filter(function(e){return e.available;}).map(function(e){return'<span class="ex-tag ex-tag-'+e.exchange+'">'+e.exchange.toUpperCase()+'</span>';}).join('');
   var sigTagsHTML=r.score.signals.slice(0,5).map(function(s){
     var cls='sig-volume';
     if(s.includes('PRE-PUMP')) cls='sig-liquidity';
@@ -2069,16 +2043,16 @@ function buildCardHTML(r, idx) {
     else if(s.includes('돌파')||s.includes('박스')) cls='sig-breakout';
     else if(s.includes('유동성')||s.includes('눌림')) cls='sig-liquidity';
     else if(s.includes('⚠')) cls='sig-warn';
-    return '<span class="sig-tag '+cls+'">'+s+'</span>';
+    return'<span class="sig-tag '+cls+'">'+s+'</span>';
   }).join('');
   var prePumpBadge=(r.prePump&&r.prePump.detected)||r.score.prePumpDetected?'<span class="prepump-badge">🟣 PRE-PUMP</span>':'';
-  var entryBadge  =(r.score.isEntryReady||(r.prePump&&r.prePump.detected&&!(r.risk&&r.risk.level==='높음')))?'<span class="sig-tag sig-breakout">✅진입가능</span>':'';
+  var entryBadge=(r.score.isEntryReady||(r.prePump&&r.prePump.detected&&!(r.risk&&r.risk.level==='높음')))?'<span class="sig-tag sig-breakout">✅진입가능</span>':'';
   var chgCls=r.change24h>=0?'change-pos':'change-neg';
-  return '<div class="result-card grade-'+r.score.grade+'" id="card-'+idx+'">'
+  return'<div class="result-card grade-'+r.score.grade+'" id="card-'+idx+'">'
     +'<div class="card-header" onclick="toggleCardDetail('+idx+')">'
     +'<div class="grade-badge grade-'+r.score.grade+'">'+r.score.grade+'</div>'
     +'<div class="card-main">'
-    +'<div class="card-symbol">'+r.base+' <div class="ex-tags">'+exTagsHTML+'</div></div>'
+    +'<div class="card-symbol">'+r.base+'<div class="ex-tags">'+exTagsHTML+'</div></div>'
     +'<div class="card-signals">'+prePumpBadge+entryBadge+sigTagsHTML+'</div>'
     +'</div>'
     +'<div class="card-right">'
@@ -2091,23 +2065,22 @@ function buildCardHTML(r, idx) {
     +'</div>';
 }
 
-function toggleCardDetail(idx) {
+function toggleCardDetail(idx){
   var detailEl=document.getElementById('detail-'+idx);
-  var chevEl  =document.getElementById('chev-'+idx);
+  var chevEl=document.getElementById('chev-'+idx);
   if(!detailEl) return;
   if(detailEl.classList.contains('open')){detailEl.classList.remove('open');if(chevEl)chevEl.classList.remove('open');return;}
   if(!detailEl.innerHTML.trim()){var r=state.displayResults[idx];if(r)detailEl.innerHTML=buildDetailHTML(r);}
   detailEl.classList.add('open');if(chevEl)chevEl.classList.add('open');
 }
 
-function buildDetailHTML(r) {
+function buildDetailHTML(r){
   var base=r.base,ind=r.indicators,tgt=r.targets,risk=r.risk,score=r.score;
-  var rsi=ind.rsi,obv=ind.obv,macd=ind.macd,vol=ind.volumeSpike,box=ind.boxRange,rs=ind.relStrength;
-  var mfi=ind.mfi||50;
+  var rsi=ind.rsi,obv=ind.obv,macd=ind.macd,vol=ind.volumeSpike,box=ind.boxRange,rs=ind.relStrength,mfi=ind.mfi||50;
   var rsiCls=rsi>75?'val-warn':rsi>60?'val-bull':rsi<45?'val-bear':'val-neutral';
   var obvCls=obv.trend==='up'?'val-bull':obv.trend==='down'?'val-bear':'val-neutral';
   var mfiCls=mfi>=55&&mfi<=75?'val-bull':mfi>75?'val-warn':mfi<40?'val-bear':'val-neutral';
-  var rsCls =rs.isStronger?'val-bull':rs.diff<-5?'val-bear':'val-neutral';
+  var rsCls=rs.isStronger?'val-bull':rs.diff<-5?'val-bear':'val-neutral';
   var volCls=vol.isSpike?'val-bull':'val-neutral';
   var macdLbl=macd.crossType==='golden'?'🟢 골든크로스':macd.crossType==='golden_hold'?'🔵 유지':macd.crossType==='dead'?'🔴 데드크로스':'⬜ 중립';
 
@@ -2117,34 +2090,29 @@ function buildDetailHTML(r) {
     +'<div class="tscore-item"><div class="tscore-label">리스크</div><div class="tscore-val tscore-risk">'+score.riskScore+'</div></div>'
     +'</div>';
 
-  var btcWarnHTML='';
-  if(state.btcFilter&&state.btcFilter.penalty>0)
-    btcWarnHTML='<div class="btc-warning">BTC 필터 페널티: -'+state.btcFilter.penalty+' ('+state.btcFilter.desc+')</div>';
-
-  var prePumpHTML='';
-  if(r.prePump&&r.prePump.detected)
-    prePumpHTML='<div style="margin-bottom:8px"><span class="prepump-badge">🟣 PRE-PUMP 초기 매집 ('+r.prePump.count+'/4 조건 충족) — entryScore/totalScore +1.5 반영됨</span></div>';
+  var btcWarnHTML=state.btcFilter&&state.btcFilter.penalty>0?'<div class="btc-warning">BTC 패널티: -'+state.btcFilter.penalty+' ('+state.btcFilter.desc+')</div>':'';
+  var prePumpHTML=r.prePump&&r.prePump.detected?'<div style="margin-bottom:8px"><span class="prepump-badge">🟣 PRE-PUMP ('+r.prePump.count+'/7 조건, 신뢰도 '+r.prePump.confidence.toFixed(1)+') — entryScore/totalScore +1.5 반영</span></div>':'';
 
   var indHTML='<div class="indicator-grid">'
     +'<div class="ind-item"><div class="ind-label">현재가</div><div class="ind-value val-neutral">'+formatPrice(r.currentPrice)+'</div></div>'
     +'<div class="ind-item"><div class="ind-label">24h 변동</div><div class="ind-value '+(r.change24h>=0?'val-bull':'val-bear')+'">'+formatPct(r.change24h)+'</div></div>'
     +'<div class="ind-item"><div class="ind-label">RSI(14)</div><div class="ind-value '+rsiCls+'">'+rsi.toFixed(1)+'</div></div>'
     +'<div class="ind-item"><div class="ind-label">MFI(14)</div><div class="ind-value '+mfiCls+'">'+mfi.toFixed(1)+'</div></div>'
-    +'<div class="ind-item"><div class="ind-label">OBV 추세</div><div class="ind-value '+obvCls+'">'+(obv.trend==='up'?'↑ 상승':obv.trend==='down'?'↓ 하락':'→ 횡보')+(obv.leading?' (선행)':'')+(obv.divergence?' ⚠다이버전스':'')+'</div></div>'
+    +'<div class="ind-item"><div class="ind-label">OBV</div><div class="ind-value '+obvCls+'">'+(obv.trend==='up'?'↑':obv.trend==='down'?'↓':'→')+(obv.leading?' 선행':'')+(obv.divergence?' ⚠다이버전스':'')+'</div></div>'
     +'<div class="ind-item"><div class="ind-label">MACD</div><div class="ind-value '+(macd.crossType.includes('golden')?'val-bull':macd.crossType==='dead'?'val-bear':'val-neutral')+'">'+macdLbl+'</div></div>'
-    +'<div class="ind-item"><div class="ind-label">거래량배율(3C)</div><div class="ind-value '+volCls+'">'+vol.ratio+'x '+(vol.trend==='increasing'?'↑':vol.trend==='decreasing'?'↓':'→')+(vol.gradual?' (점진적)':'')+'</div></div>'
+    +'<div class="ind-item"><div class="ind-label">거래량(3C평균)</div><div class="ind-value '+volCls+'">'+vol.ratio+'x '+(vol.trend==='increasing'?'↑':vol.trend==='decreasing'?'↓':'→')+(vol.gradual?' 점진적':'')+'</div></div>'
     +'<div class="ind-item"><div class="ind-label">BTC 상대강도</div><div class="ind-value '+rsCls+'">'+(rs.isStronger?'↑ 강':'↓ 약')+' ('+formatPct(rs.diff)+')</div></div>'
     +'<div class="ind-item"><div class="ind-label">박스 상단</div><div class="ind-value val-neutral">'+formatPrice(box.high)+'</div></div>'
     +'<div class="ind-item"><div class="ind-label">박스 하단</div><div class="ind-value val-neutral">'+formatPrice(box.low)+'</div></div>'
     +'<div class="ind-item"><div class="ind-label">돌파강도</div><div class="ind-value '+(box.isBreakout&&box.breakoutStrength<=5?'val-bull':box.isBreakout&&box.breakoutStrength>8?'val-warn':box.isNearTop?'val-warn':'val-neutral')+'">'+(box.isBreakout?box.breakoutStrength+'% 돌파':box.distanceToTop.toFixed(1)+'% 남음')+'</div></div>'
-    +'<div class="ind-item"><div class="ind-label">ATR(14) %</div><div class="ind-value val-neutral">'+tgt.atrPct+'%</div></div>'
+    +'<div class="ind-item"><div class="ind-label">ATR %</div><div class="ind-value val-neutral">'+tgt.atrPct+'%</div></div>'
     +'</div>';
 
   var exCompHTML=r.exStates.map(function(ex){
-    if(!ex.available) return '<div class="ex-compare-row"><span class="ex-compare-name" style="color:var(--text-muted)">'+ex.exchange.toUpperCase()+'</span><div class="ex-bar-wrap"></div><span class="ex-compare-val" style="color:var(--text-muted)">N/A</span><span class="ex-compare-status">미수집</span></div>';
+    if(!ex.available) return'<div class="ex-compare-row"><span class="ex-compare-name" style="color:var(--text-muted)">'+ex.exchange.toUpperCase()+'</span><div class="ex-bar-wrap"></div><span class="ex-compare-val" style="color:var(--text-muted)">N/A</span><span class="ex-compare-status">미수집</span></div>';
     var bc=ex.strength>65?'var(--accent-green)':ex.strength>40?'var(--accent-cyan)':'var(--text-muted)';
     var sc=ex.status==='돌파'?'var(--accent-green)':ex.status==='강세'?'var(--accent-cyan)':ex.status==='약세'?'var(--accent-red)':'var(--text-muted)';
-    return '<div class="ex-compare-row"><span class="ex-compare-name" style="font-family:var(--mono);font-size:.65rem">'+ex.exchange.toUpperCase()+'</span><div class="ex-bar-wrap"><div class="ex-bar" style="width:'+Math.min(ex.strength,100)+'%;background:'+bc+'"></div></div><span class="ex-compare-val" style="color:'+bc+'">RSI '+(ex.rsi?ex.rsi.toFixed(0):'-')+'</span><span class="ex-compare-status" style="color:'+sc+'">'+ex.status+'</span></div>';
+    return'<div class="ex-compare-row"><span class="ex-compare-name" style="font-family:var(--mono);font-size:.65rem">'+ex.exchange.toUpperCase()+'</span><div class="ex-bar-wrap"><div class="ex-bar" style="width:'+Math.min(ex.strength,100)+'%;background:'+bc+'"></div></div><span class="ex-compare-val" style="color:'+bc+'">RSI '+(ex.rsi?ex.rsi.toFixed(0):'-')+'</span><span class="ex-compare-status" style="color:'+sc+'">'+ex.status+'</span></div>';
   }).join('');
 
   var bdHTML='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
@@ -2166,26 +2134,25 @@ function buildDetailHTML(r) {
     +'<div class="target-item target-3"><div class="target-label">3차 목표</div><div class="target-val">'+formatPrice(tgt.target3)+'</div><div style="font-size:.6rem;color:var(--text-muted)">4R</div></div>'
     +'<div class="target-item stop-item"><div class="target-label">손절기준</div><div class="target-val">'+formatPrice(tgt.stopLoss)+'</div><div style="font-size:.6rem;color:var(--text-muted)">-'+tgt.stopPercent.toFixed(1)+'%</div></div>'
     +'</div>'
-    +'<div style="font-size:.6rem;color:var(--text-muted);margin-top:4px;font-family:var(--mono)">진입가: '+formatPrice(tgt.entry)+' | R:R=1:'+tgt.riskReward+' | 위험도: '+risk.level+' | 손절: box하단-ATR×0.5</div>';
+    +'<div style="font-size:.6rem;color:var(--text-muted);margin-top:4px;font-family:var(--mono)">진입가: '+formatPrice(tgt.entry)+' | R:R=1:'+tgt.riskReward+' | 위험도: '+risk.level+' | 손절=박스하단-ATR×0.5</div>';
 
-  var riskHTML=risk.reasons.length
-    ?risk.reasons.map(function(r2){return '<div class="risk-item"><div class="risk-dot"></div><span>'+r2+'</span></div>';}).join('')
-    :'<div class="risk-item"><div class="risk-dot" style="background:var(--accent-green)"></div><span>특이 리스크 없음</span></div>';
-  var warnHTML=score.warnings.map(function(w){return '<div class="risk-item"><div class="risk-dot"></div><span>'+w+'</span></div>';}).join('');
+  var riskHTML=risk.reasons.length?risk.reasons.map(function(r2){return'<div class="risk-item"><div class="risk-dot"></div><span>'+r2+'</span></div>';}).join(''):'<div class="risk-item"><div class="risk-dot" style="background:var(--accent-green)"></div><span>특이 리스크 없음</span></div>';
+  var warnHTML=score.warnings.map(function(w){return'<div class="risk-item"><div class="risk-dot"></div><span>'+w+'</span></div>';}).join('');
 
   var actCls=score.action==='진입 우선'?'action-enter':score.action==='분할 진입'?'action-split':score.action==='눌림 대기'?'action-pullback':score.action.includes('금지')||score.action.includes('관망')?'action-avoid':score.action.includes('PRE-PUMP')?'action-split':'action-watch';
 
+  var binanceLink=SYMBOL_MAP[base]?'<a href="https://www.binance.com/en/trade/'+base+'_USDT" target="_blank" class="chart-open-btn-ex">바이낸스 ↗</a>':'';
   var chartHTML='<div style="display:flex;flex-direction:column;gap:8px">'
     +'<button class="chart-open-btn" onclick="openTVModal(\''+base+'\','+JSON.stringify(r.exStates.filter(function(e){return e.available;}).map(function(e){return e.exchange;}))+',{})">📈 TradingView 차트 열기 (RSI·MACD·거래량)</button>'
     +'<div style="display:flex;gap:6px;flex-wrap:wrap">'
-    +(SYMBOL_MAP[base]&&SYMBOL_MAP[base].upbit?'<a href="https://upbit.com/exchange?code=CRIX.UPBIT.KRW-'+base+'" target="_blank" class="chart-open-btn-ex">업비트 ↗</a>':'')
-    +(SYMBOL_MAP[base]&&SYMBOL_MAP[base].binance?'<a href="https://www.binance.com/en/trade/'+base+'_USDT" target="_blank" class="chart-open-btn-ex">바이낸스 ↗</a>':'')
+    +'<a href="https://upbit.com/exchange?code=CRIX.UPBIT.KRW-'+base+'" target="_blank" class="chart-open-btn-ex">업비트 ↗</a>'
+    +binanceLink
     +'<a href="https://www.tradingview.com/chart/?symbol=UPBIT:'+base+'KRW&interval=60" target="_blank" class="chart-open-btn-ex">TV 전체화면 ↗</a>'
     +'</div></div>';
 
   return btcWarnHTML+prePumpHTML+tripleHTML
-    +'<div class="detail-section"><div class="detail-section-title">▶ INDICATORS (3캔들 평균 거래량 기준)</div>'+indHTML+'</div>'
-    +'<div class="detail-section"><div class="detail-section-title">▶ 박스권 구조 ('+box.boxPeriod+'봉 기준)</div><div class="structure-box"><div class="structure-label">현재 구조</div><div class="structure-text">'+score.structureDesc+'</div></div></div>'
+    +'<div class="detail-section"><div class="detail-section-title">▶ INDICATORS (거래량=3캔들평균)</div>'+indHTML+'</div>'
+    +'<div class="detail-section"><div class="detail-section-title">▶ 박스권 구조 ('+box.boxPeriod+'봉)</div><div class="structure-box"><div class="structure-label">현재 구조</div><div class="structure-text">'+score.structureDesc+'</div></div></div>'
     +'<div class="detail-section"><div class="detail-section-title">▶ 거래소별 비교</div><div class="ex-compare">'+exCompHTML+'</div></div>'
     +'<div class="detail-section"><div class="detail-section-title">▶ 점수 산출 (종합: '+score.total+')</div>'+bdHTML+'</div>'
     +'<div class="detail-section"><div class="detail-section-title">▶ 구조 해석</div><div class="accumulation-box">'+score.accComment.replace(/\n/g,'<br>')+'</div></div>'
@@ -2198,32 +2165,29 @@ function buildDetailHTML(r) {
 
 // ── TradingView 모달 ──────────────────────────────────────────────
 var tvState={base:'',interval:'60',exchange:'upbit',available:[]};
-
-function buildTVWidgetURL(base,exchange,interval) {
+function buildTVWidgetURL(base,exchange,interval){
   var sym=exchange==='binance'?'BINANCE:'+base+'USDT':'UPBIT:'+base+'KRW';
-  return 'https://www.tradingview.com/widgetembed/?symbol='+encodeURIComponent(sym)
+  return'https://www.tradingview.com/widgetembed/?symbol='+encodeURIComponent(sym)
     +'&interval='+interval+'&timezone='+encodeURIComponent('Asia/Seoul')
     +'&theme=dark&style=1&locale=kr&toolbar_bg=%230c1420'
     +'&enable_publishing=false&save_image=false'
     +'&studies='+encodeURIComponent('RSI@tv-basicstudies,MACD@tv-basicstudies,Volume@tv-basicstudies');
 }
-
-function openTVModal(base,available,indicators) {
-  tvState.base=base; tvState.available=available&&available.length?available:['upbit'];
+function openTVModal(base,available,indicators){
+  tvState.base=base;tvState.available=available&&available.length?available:['upbit'];
   tvState.exchange=tvState.available.includes('upbit')?'upbit':tvState.available[0];
   document.getElementById('tvModalSymbol').textContent=base;
-  renderTVExBar(); loadTVChart(); renderTVExtLinks(base);
+  renderTVExBar();loadTVChart();renderTVExtLinks(base);
   document.getElementById('tvModal').classList.add('open');
   document.body.style.overflow='hidden';
 }
 function closeTVModal(){document.getElementById('tvModal').classList.remove('open');document.body.style.overflow='';document.getElementById('tvIframe').src='';}
 document.addEventListener('keydown',function(e){if(e.key==='Escape')closeTVModal();});
-
 function renderTVExBar(){
   var bar=document.getElementById('tvExBar');
   var labels={upbit:'UPBIT (KRW)',binance:'BINANCE (USDT)'};
   bar.innerHTML=tvState.available.map(function(ex){
-    return '<button class="tv-ex-btn '+(ex===tvState.exchange?'active-'+ex:'')+'" id="tvExBtn-'+ex+'" onclick="switchTVExchange(\''+ex+'\')">'+( labels[ex]||ex.toUpperCase())+'</button>';
+    return'<button class="tv-ex-btn '+(ex===tvState.exchange?'active-'+ex:'')+'" id="tvExBtn-'+ex+'" onclick="switchTVExchange(\''+ex+'\')">'+( labels[ex]||ex.toUpperCase())+'</button>';
   }).join('');
 }
 function switchTVExchange(ex){tvState.exchange=ex;tvState.available.forEach(function(e){var b=document.getElementById('tvExBtn-'+e);if(b)b.className='tv-ex-btn '+(e===ex?'active-'+e:'');});loadTVChart();}
@@ -2248,22 +2212,25 @@ function renderTVExtLinks(base){
     {label:'TV 전체화면',url:'https://www.tradingview.com/chart/?symbol=UPBIT:'+base+'KRW&interval='+tvState.interval}
   ];
   var el=document.getElementById('tvExtLinks');
-  if(el)el.innerHTML=links.map(function(l){return '<a href="'+l.url+'" target="_blank" class="tv-ext-link">'+l.label+' ↗</a>';}).join('');
+  if(el) el.innerHTML=links.map(function(l){return'<a href="'+l.url+'" target="_blank" class="tv-ext-link">'+l.label+' ↗</a>';}).join('');
 }
 document.getElementById('tvModal').addEventListener('click',function(e){if(e.target===this)closeTVModal();});
 
 // ── 시계 + 초기화 ─────────────────────────────────────────────────
 function updateClock(){var el=document.getElementById('clock');if(el)el.textContent=new Date().toLocaleTimeString('ko-KR',{hour12:false});}
-setInterval(updateClock,1000); updateClock();
+setInterval(updateClock,1000);updateClock();
 
-window.addEventListener('load', function(){
+window.addEventListener('load',function(){
   document.getElementById('liveDot').className='live-dot';
   document.getElementById('liveStatus').textContent='READY';
+  // Worker URL에 upbit 경로 추가 안내
+  addLog('업비트 전체 KRW 마켓 스캔 모드 — BLUR 등 중소형 알트 자동 포함','info');
+  addLog('SCAN START 버튼으로 오늘 움직이는 코인 자동 선별 시작','info');
 
   var cached=loadCache();
-  if (cached&&cached.data&&cached.data.length>0) {
-    state.results=cached.data; state.displayResults=cached.data;
-    renderSummary(); applyFilter();
+  if(cached&&cached.data&&cached.data.length>0){
+    state.results=cached.data;state.displayResults=cached.data;
+    renderSummary();applyFilter();
     document.getElementById('summaryBar').classList.add('visible');
     document.getElementById('filterBar').classList.add('visible');
     document.getElementById('quickFilterBar').classList.add('visible');
