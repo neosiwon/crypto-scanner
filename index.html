@@ -313,10 +313,84 @@ body::before {
 }
 @keyframes fadeSlide { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
 .result-card:hover { border-color: var(--border-bright); }
-.result-card.grade-S { border-left: 3px solid var(--accent-red); }
-.result-card.grade-A { border-left: 3px solid var(--accent-orange); }
-.result-card.grade-B { border-left: 3px solid var(--accent-yellow); }
-.result-card.grade-C { border-left: 3px solid var(--text-muted); }
+.result-card/* ── 등급 색상 변수 ── */
+:root {
+  --grade-sp: #FF2D55;
+  --grade-s:  #FF6B35;
+  --grade-a:  #FF9500;
+  --grade-b:  #FFD60A;
+  --grade-c:  #8E8E93;
+}
+
+/* ── 카드 좌측 보더 ── */
+.result-card.grade-SP { border-left: 4px solid var(--grade-sp); }
+.result-card.grade-S  { border-left: 4px solid var(--grade-s);  }
+.result-card.grade-A  { border-left: 4px solid var(--grade-a);  }
+.result-card.grade-B  { border-left: 4px solid var(--grade-b);  }
+.result-card.grade-C  { border-left: 4px solid var(--grade-c);  }
+
+/* ── 등급 뱃지 — 불투명 배경으로 가독성 확보 ── */
+.grade-badge.grade-SP {
+  background: var(--grade-sp);
+  color: #fff;
+  border: none;
+  font-weight: 800;
+  font-size: .8rem;
+  text-shadow: 0 1px 2px rgba(0,0,0,.4);
+  box-shadow: 0 2px 8px rgba(255,45,85,.5);
+  animation: spPulse 2s ease-in-out infinite;
+}
+@keyframes spPulse {
+  0%,100% { box-shadow: 0 2px 8px rgba(255,45,85,.5); }
+  50%     { box-shadow: 0 2px 16px rgba(255,45,85,.9); }
+}
+.grade-badge.grade-S {
+  background: var(--grade-s);
+  color: #fff;
+  border: none;
+  font-weight: 700;
+  text-shadow: 0 1px 2px rgba(0,0,0,.3);
+}
+.grade-badge.grade-A {
+  background: var(--grade-a);
+  color: #000;
+  border: none;
+  font-weight: 700;
+}
+.grade-badge.grade-B {
+  background: var(--grade-b);
+  color: #000;
+  border: none;
+  font-weight: 600;
+}
+.grade-badge.grade-C {
+  background: rgba(142,142,147,.25);
+  color: #aaa;
+  border: 1px solid rgba(142,142,147,.4);
+}
+
+/* ── ENTRY READY 배너 ── */
+.entry-ready-banner {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 12px; margin-bottom: 5px;
+  background: #00c06b;
+  border-radius: 4px;
+  font-family: var(--mono); font-size: .75rem;
+  font-weight: 800; color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,.3);
+  letter-spacing: 1px;
+  animation: entryPulse 2s ease-in-out infinite;
+}
+@keyframes entryPulse {
+  0%,100% { background: #00c06b; }
+  50%     { background: #00e67a; }
+}
+.entry-ready-banner::before { content: '✅ '; }
+
+/* ── 요약 카드 등급별 수치 색상 ── */
+.sc-sp .sum-val { color: var(--grade-sp); font-weight:800; }
+.sc-s  .sum-val { color: var(--grade-s);  font-weight:700; }
+.sc-a  .sum-val { color: var(--grade-a);  font-weight:700; }
 
 /* 카드 헤더 (항상 보임) */
 .card-header {
@@ -964,15 +1038,19 @@ body::before {
   <!-- ─── 요약 통계 ─── -->
   <div id="summaryBar">
     <div class="sum-card sc-total">
-      <div class="sum-label">TOTAL SIGNALS</div>
+      <div class="sum-label">TOTAL</div>
       <div class="sum-val" id="sumTotal">0</div>
     </div>
-    <div class="sum-card sc-strong">
-      <div class="sum-label">S등급 (6.0+)</div>
+    <div class="sum-card sc-sp">
+      <div class="sum-label">🔥 S+</div>
+      <div class="sum-val" id="sumSP">0</div>
+    </div>
+    <div class="sum-card sc-s">
+      <div class="sum-label">🔥 S</div>
       <div class="sum-val" id="sumStrong">0</div>
     </div>
-    <div class="sum-card sc-watch">
-      <div class="sum-label">A등급 (4.5~5.9)</div>
+    <div class="sum-card sc-a">
+      <div class="sum-label">🟠 A</div>
       <div class="sum-val" id="sumWatch">0</div>
     </div>
     <div class="sum-card sc-score">
@@ -998,12 +1076,15 @@ body::before {
   <div id="filterBar">
     <span class="filter-label">GRADE:</span>
     <button class="grade-filter f-active" onclick="setFilter('ALL',this)">ALL</button>
-    <button class="grade-filter" onclick="setFilter('S',this)">S</button>
-    <button class="grade-filter" onclick="setFilter('A',this)">A</button>
+    <button class="grade-filter" onclick="setFilter('SP',this)">🔥 S+</button>
+    <button class="grade-filter" onclick="setFilter('S',this)">🔥 S</button>
+    <button class="grade-filter" onclick="setFilter('A',this)">🟠 A</button>
     <button class="grade-filter" onclick="setFilter('B',this)">B</button>
+    <button class="grade-filter" onclick="setFilter('C',this)">C</button>
     <button class="grade-filter" onclick="setFilter('C',this)">C</button>
     <select class="sort-select" id="sortSelect" onchange="applyFilter()">
       <option value="score">종합점수순</option>
+      <option value="sp">S+ 우선</option>
       <option value="entry">진입점수순</option>
       <option value="prepump">PRE-PUMP우선</option>
       <option value="change">변동률순</option>
@@ -2243,7 +2324,13 @@ function calcCompositeScore(ind,btcFilter,prePump){
     total=parseFloat(Math.min(total+1.5,15).toFixed(2));
   }
 
-  var grade=total>=6?'S':total>=4.5?'A':total>=3?'B':'C';
+  // 등급: S+(≥5.0) / S(≥4.5) / A(≥3.5) / B(≥2.0) / C
+  var grade, gradeDisplay, gradeColor;
+  if      (total >= 5.0) { grade='SP'; gradeDisplay='S+'; gradeColor='var(--grade-sp)'; }
+  else if (total >= 4.5) { grade='S';  gradeDisplay='S';  gradeColor='var(--grade-s)';  }
+  else if (total >= 3.5) { grade='A';  gradeDisplay='A';  gradeColor='var(--grade-a)';  }
+  else if (total >= 2.0) { grade='B';  gradeDisplay='B';  gradeColor='var(--grade-b)';  }
+  else                   { grade='C';  gradeDisplay='C';  gradeColor='var(--grade-c)';  }
 
   // [핵심] isEntryReady — PRE-PUMP 예외 포함
   var isHighRisk=riskFinal>=4;
@@ -2593,8 +2680,12 @@ function applyFilter(){
   var filtered=state.results.slice();
 
   // 등급 필터
-  if(state.filteredGrade!=='ALL')
-    filtered=filtered.filter(function(r){return r.score.grade===state.filteredGrade;});
+  if(state.filteredGrade!=='ALL'){
+    if(state.filteredGrade==='SP')
+      filtered=filtered.filter(function(r){return r.score.grade==='SP';});
+    else
+      filtered=filtered.filter(function(r){return r.score.grade===state.filteredGrade;});
+  }
 
   // 퀵 필터
   if(state.quickFilter==='entry'){
@@ -2623,6 +2714,14 @@ function applyFilter(){
       return b.score.entryScore-a.score.entryScore||b.score.total-a.score.total;
     }
 
+    // S+ 우선 정렬
+    if(sortBy==='sp'){
+      var aSP=a.score.grade==='SP'?1:0;
+      var bSP=b.score.grade==='SP'?1:0;
+      if(bSP!==aSP) return bSP-aSP;
+      return b.score.total-a.score.total;
+    }
+
     // 진입점수순: PRE-PUMP 우선 → entryScore → total
     if(sortBy==='entry'){
       if(bPre!==aPre) return bPre-aPre;
@@ -2649,8 +2748,9 @@ function applyFilter(){
 function renderSummary(){
   var r=state.results;
   document.getElementById('sumTotal').textContent=r.length;
+  document.getElementById('sumSP').textContent    =r.filter(function(x){return x.score.grade==='SP';}).length;
   document.getElementById('sumStrong').textContent=r.filter(function(x){return x.score.grade==='S';}).length;
-  document.getElementById('sumWatch').textContent=r.filter(function(x){return x.score.grade==='A';}).length;
+  document.getElementById('sumWatch').textContent =r.filter(function(x){return x.score.grade==='A';}).length;
   var top=r.reduce(function(m,x){return x.score.total>m?x.score.total:m;},0);
   document.getElementById('sumTop').textContent=top;
 }
@@ -2667,7 +2767,11 @@ function renderResultList(results){
 }
 
 function buildCardHTML(r,idx){
-  var scoreColor=r.score.grade==='S'?'var(--accent-red)':r.score.grade==='A'?'var(--accent-orange)':r.score.grade==='B'?'var(--accent-yellow)':'var(--text-muted)';
+  var scoreColor=r.score.gradeColor||
+    (r.score.grade==='SP'?'var(--grade-sp)':
+     r.score.grade==='S' ?'var(--grade-s)':
+     r.score.grade==='A' ?'var(--grade-a)':
+     r.score.grade==='B' ?'var(--grade-b)':'var(--grade-c)');
   var exTagsHTML=r.exStates.filter(function(e){return e.available;}).map(function(e){return'<span class="ex-tag ex-tag-'+e.exchange+'">'+e.exchange.toUpperCase()+'</span>';}).join('');
   var sigTagsHTML=r.score.signals.slice(0,5).map(function(s){
     var cls='sig-volume';
@@ -2682,12 +2786,14 @@ function buildCardHTML(r,idx){
   var prePumpBadge=(r.prePump&&r.prePump.detected)||r.score.prePumpDetected?'<span class="prepump-badge">🟣 PRE-PUMP</span>':'';
   var entryBadge=(r.score.isEntryReady||(r.prePump&&r.prePump.detected&&!(r.risk&&r.risk.level==='높음')))?'<span class="sig-tag sig-breakout">✅진입가능</span>':'';
   var chgCls=r.change24h>=0?'change-pos':'change-neg';
-  return'<div class="result-card grade-'+r.score.grade+'" id="card-'+idx+'">'
+  var gradeClass = r.score.grade === 'SP' ? 'grade-SP' : 'grade-' + r.score.grade;
+  return'<div class="result-card '+gradeClass+'" id="card-'+idx+'">'
     +'<div class="card-header" onclick="toggleCardDetail('+idx+')">'
-    +'<div class="grade-badge grade-'+r.score.grade+'">'+r.score.grade+'</div>'
+    +'<div class="grade-badge grade-'+(r.score.grade==='SP'?'SP':r.score.grade)+'">'+(r.score.gradeDisplay||r.score.grade)+'</div>'
     +'<div class="card-main">'
     +'<div class="card-symbol">'+r.base+'<div class="ex-tags">'+exTagsHTML+'</div></div>'
-    +'<div class="card-signals">'+prePumpBadge+entryBadge+sigTagsHTML+'</div>'
+    +(r.score.isEntryReady?'<div class="entry-ready-banner">ENTRY READY</div>':'')
+    +'<div class="card-signals">'+prePumpBadge+sigTagsHTML+'</div>'
     +'</div>'
     +'<div class="card-right">'
     +'<div class="card-score" style="color:'+scoreColor+'">'+r.score.total+'</div>'
@@ -2732,7 +2838,10 @@ function buildDetailHTML(r){
   var volCls=vol.isSpike?'val-bull':'val-neutral';
   var macdLbl=macd.crossType==='golden'?'🟢 골든크로스':macd.crossType==='golden_hold'?'🔵 유지':macd.crossType==='dead'?'🔴 데드크로스':'⬜ 중립';
 
+  var gradeDisp=score.gradeDisplay||score.grade;
+  var gradeCol=score.gradeColor||'var(--text-secondary)';
   var tripleHTML='<div class="triple-score">'
+    +'<div class="tscore-item"><div class="tscore-label">등급</div><div class="tscore-val" style="color:'+gradeCol+';font-size:1.2rem;font-weight:800">'+gradeDisp+'</div></div>'
     +'<div class="tscore-item"><div class="tscore-label">구조 점수</div><div class="tscore-val tscore-structure">'+score.structScore+'</div></div>'
     +'<div class="tscore-item"><div class="tscore-label">진입 점수</div><div class="tscore-val tscore-entry">'+score.entryScore+'</div></div>'
     +'<div class="tscore-item"><div class="tscore-label">리스크</div><div class="tscore-val tscore-risk">'+score.riskScore+'</div></div>'
