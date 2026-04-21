@@ -1014,7 +1014,7 @@ body::before {
       </div>
       <div class="input-group">
         <label class="input-label">최소 점수 (기본 4)</label>
-        <input type="number" class="ctrl-input" id="inputMinScore" value="4" min="0" max="14" step="0.5">
+        <input type="number" class="ctrl-input" id="inputMinScore" value="2" min="0" max="14" step="0.5">
       </div>
       <div class="input-group">
         <label class="input-label">캔들 수 (50~200)</label>
@@ -1134,7 +1134,6 @@ body::before {
     <button class="grade-filter" onclick="setFilter('S',this)">🔥 S</button>
     <button class="grade-filter" onclick="setFilter('A',this)">🟠 A</button>
     <button class="grade-filter" onclick="setFilter('B',this)">B</button>
-    <button class="grade-filter" onclick="setFilter('C',this)">C</button>
     <button class="grade-filter" onclick="setFilter('C',this)">C</button>
     <select class="sort-select" id="sortSelect" onchange="applyFilter()">
       <option value="score">종합점수순</option>
@@ -1598,7 +1597,7 @@ function detectPrePump(volRatio, rsi, box, changeRate) {
   return detected;
 }
 
-// 점수: PRE-PUMP(+3) + 속도(+0.5~1.0) + OBV(+1) = 최대 5.5
+// 점수: PRE-PUMP(+3) + 속도(+0.5~1.0) + OBV(+1) = 최대 5.0
 // S 구간(4.5~4.9) 자연 형성
 function calcScore(prePump, volAccel, obvTrend, btcPenalty) {
   var total = 0;
